@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { BookOpen, Brain, Flame, Trophy, ChevronRight } from 'lucide-react'
+import { BookOpen, Brain, Flame, Trophy, ChevronRight, Zap, Medal } from 'lucide-react'
 import { dbHelpers } from '../services/firebase'
+import { getLevelInfo } from '../utils/levels'
 import StreakBadge from '../components/StreakBadge'
 import BadgeDisplay from '../components/BadgeDisplay'
 
@@ -21,6 +22,9 @@ export default function Dashboard({ user, userDoc }) {
       </div>
     )
   }
+
+  const xp = userDoc?.xp || 0
+  const { current: lvl, next, progress } = getLevelInfo(xp)
 
   const stats = [
     {
@@ -54,6 +58,31 @@ export default function Dashboard({ user, userDoc }) {
         </h1>
         <p className="text-slate-400 mb-8">Here's how you're doing.</p>
 
+        {/* Level + XP bar */}
+        <div className="mb-6 rounded-2xl border border-purple-500/20 bg-purple-500/10 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <p className="text-xs text-purple-300/70 mb-0.5 uppercase tracking-wider">Level {lvl.level}</p>
+              <p className="text-lg font-bold text-white">{lvl.title}</p>
+            </div>
+            <div className="flex items-center gap-1.5 text-purple-300 text-sm font-semibold">
+              <Zap size={15} fill="currentColor" />
+              {xp} XP
+            </div>
+          </div>
+          <div className="h-2 rounded-full bg-purple-900/60">
+            <div
+              className="h-full rounded-full bg-purple-400 transition-all duration-700"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          {next && (
+            <p className="text-xs text-slate-500 mt-1.5 text-right">
+              {next.minXP - xp} XP to <span className="text-purple-300">{next.title}</span>
+            </p>
+          )}
+        </div>
+
         {/* Streak hero */}
         <div className="mb-8 rounded-2xl border border-orange-500/20 bg-orange-500/10 p-6 flex items-center justify-between">
           <div>
@@ -62,7 +91,7 @@ export default function Dashboard({ user, userDoc }) {
             <p className="text-xs text-slate-400 mt-2">
               {userDoc?.streak === 0
                 ? 'Search a term today to start your streak!'
-                : 'Keep it up — don\'t break the chain!'}
+                : "Keep it up — don't break the chain!"}
             </p>
           </div>
           <Flame size={52} className="text-orange-400/30" fill="currentColor" />
@@ -98,6 +127,16 @@ export default function Dashboard({ user, userDoc }) {
             <div className="flex items-center gap-3">
               <Brain size={20} className="text-amber-500" />
               <span className="text-sm font-medium text-white">My word bank</span>
+            </div>
+            <ChevronRight size={16} className="text-slate-500 group-hover:text-amber-400 transition-colors" />
+          </Link>
+          <Link
+            to="/leaderboard"
+            className="col-span-2 flex items-center justify-between rounded-xl border border-slate-700/50 bg-[#1E293B] p-4 hover:border-amber-500/30 transition-colors group"
+          >
+            <div className="flex items-center gap-3">
+              <Medal size={20} className="text-amber-500" />
+              <span className="text-sm font-medium text-white">Streak Leaderboard</span>
             </div>
             <ChevronRight size={16} className="text-slate-500 group-hover:text-amber-400 transition-colors" />
           </Link>

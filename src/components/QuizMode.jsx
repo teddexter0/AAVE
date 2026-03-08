@@ -43,13 +43,14 @@ export default function QuizMode({ user, onFinish }) {
 
     if (correct) setScore((s) => s + 1)
 
-    // Update mastery level
+    // Update mastery level + award XP for correct answer
     await recordQuizResult(user.uid, q.termId, correct, q.masteryLevel)
+    if (correct) await dbHelpers.addXP(user.uid, 10).catch(() => {})
 
     // Auto-advance after 1.2s
     setTimeout(async () => {
       if (current + 1 >= questions.length) {
-        // Quiz complete
+        // Quiz complete — bonus XP + badge
         const finalScore = newAnswers.filter((a) => a.correct).length
         await saveQuizSession(
           user.uid,
@@ -58,6 +59,7 @@ export default function QuizMode({ user, onFinish }) {
           questions.length
         )
         await streakService.recordActivity(user.uid)
+        await dbHelpers.addXP(user.uid, 5).catch(() => {}) // completion bonus
 
         // Award quiz starter badge
         await dbHelpers.awardBadge(user.uid, 'quiz_starter')

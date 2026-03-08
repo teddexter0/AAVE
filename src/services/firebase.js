@@ -12,6 +12,7 @@ import {
   getDocs,
   orderBy,
   limit,
+  increment,
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore'
@@ -79,6 +80,7 @@ export const dbHelpers = {
       streak: 0,
       lastActiveDate: '',
       wordsLookedUp: 0,
+      xp: 0,
       badges: [],
       joinedAt: serverTimestamp(),
     })
@@ -102,6 +104,11 @@ export const dbHelpers = {
 
   async updateUserDoc(uid, data) {
     await updateDoc(doc(db, 'users', uid), data)
+  },
+
+  // XP — uses atomic increment to avoid race conditions
+  async addXP(uid, amount) {
+    await updateDoc(doc(db, 'users', uid), { xp: increment(amount) })
   },
 
   // Terms
@@ -132,14 +139,7 @@ export const dbHelpers = {
         nextReviewAt: Timestamp.fromDate(new Date()),
         quizAttempts: 0,
       })
-      // Increment wordsLookedUp counter
-      const userRef = doc(db, 'users', uid)
-      const userSnap = await getDoc(userRef)
-      if (userSnap.exists()) {
-        await updateDoc(userRef, {
-          wordsLookedUp: (userSnap.data().wordsLookedUp || 0) + 1,
-        })
-      }
+      await updateDoc(doc(db, 'users', uid), { wordsLookedUp: increment(1) })
     }
   },
 
@@ -189,6 +189,14 @@ export const dbHelpers = {
     if (!badges.includes(badgeId)) {
       await updateDoc(ref, { badges: [...badges, badgeId] })
     }
+  },
+
+  // Leaderboard — top 10 by streak (Firestore auto-indexes single fields)
+  async getLeaderboard() {
+    const snap = await getDocs(
+      query(collection(db, 'users'), orderBy('streak', 'desc'), limit(10))
+    )
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
   },
 }
 

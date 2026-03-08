@@ -5,6 +5,7 @@ import Home from './pages/Home'
 import Dashboard from './pages/Dashboard'
 import WordBankPage from './pages/WordBankPage'
 import ProfilePage from './pages/ProfilePage'
+import Leaderboard from './pages/Leaderboard'
 
 export default function App() {
   const { user, userDoc, loading } = useAuth()
@@ -38,6 +39,7 @@ export default function App() {
             path="/profile"
             element={user ? <ProfilePage user={user} userDoc={userDoc} /> : <Navigate to="/" replace />}
           />
+          <Route path="/leaderboard" element={<Leaderboard user={user} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

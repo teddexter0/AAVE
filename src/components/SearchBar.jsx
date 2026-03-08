@@ -42,6 +42,7 @@ export default function SearchBar({ user, onSearch }) {
       // Post-lookup side-effects for authenticated users
       if (user) {
         await streakService.recordActivity(user.uid)
+        await dbHelpers.addXP(user.uid, 2).catch(() => {})
 
         // Check and award badges based on wordsLookedUp count
         const userDoc = await dbHelpers.getUserDoc(user.uid)
