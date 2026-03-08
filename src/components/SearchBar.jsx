@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Loader2, AlertCircle } from 'lucide-react'
 import { lookupTerm } from '../services/termLookup'
+import { GeminiRateLimitError } from '../services/gemini'
 import { streakService } from '../services/streakService'
 import { dbHelpers } from '../services/firebase'
 import TermCard from './TermCard'
@@ -56,7 +57,11 @@ export default function SearchBar({ user, onSearch }) {
       onSearch?.()
     } catch (err) {
       console.error('Search error:', err)
-      setErrorMsg('Something went wrong. Check your connection and try again.')
+      setErrorMsg(
+        err instanceof GeminiRateLimitError
+          ? 'AI lookup is rate-limited right now. Wait a minute and try again, or check your spelling — the term might already be in our dictionary.'
+          : 'Something went wrong. Check your connection and try again.'
+      )
       setStatus('error')
     }
   }
