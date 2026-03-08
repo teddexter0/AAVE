@@ -2,15 +2,61 @@ import { dbHelpers } from './firebase'
 import { lookupWithGemini } from './gemini'
 import { referenceDocuments } from '../data/referenceDocuments'
 
+/** Levenshtein edit distance between two strings */
+function editDistance(a, b) {
+  const m = a.length, n = b.length
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i])
+  for (let j = 0; j <= n; j++) dp[0][j] = j
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+    }
+  }
+  return dp[m][n]
+}
+
+/**
+ * Looks up a term in local referenceDocuments.
+ * Accepts exact matches and fuzzy matches where normalised edit distance ≤ 0.35
+ * (i.e. at least ~65% similar), so typos and minor variants still resolve.
+ */
 function lookupInLocalData(rawTerm) {
   const needle = rawTerm.trim().toLowerCase()
-  const entry = referenceDocuments.find(e => e.word && e.word.toLowerCase() === needle)
-  if (!entry) return null
+
+  let bestEntry = null
+  let bestScore = Infinity
+
+  for (const e of referenceDocuments) {
+    if (!e.word) continue
+    const candidate = e.word.toLowerCase()
+
+    // Exact match — return immediately
+    if (candidate === needle) {
+      bestEntry = e
+      break
+    }
+
+    // Fuzzy: normalised edit distance (0 = identical, 1 = completely different)
+    const maxLen = Math.max(needle.length, candidate.length)
+    const dist = editDistance(needle, candidate)
+    const normDist = dist / maxLen
+
+    if (normDist < bestScore) {
+      bestScore = normDist
+      bestEntry = e
+    }
+  }
+
+  // Reject if best match is more than 35% different
+  if (!bestEntry || bestScore > 0.35) return null
+
   return {
-    term: entry.word,
-    definition: entry.meaning,
-    example: entry.context || '',
-    origin: entry.origin || '',
+    term: bestEntry.word,
+    definition: bestEntry.meaning,
+    example: bestEntry.context || '',
+    origin: bestEntry.origin || '',
     related: [],
     category: 'expression',
   }

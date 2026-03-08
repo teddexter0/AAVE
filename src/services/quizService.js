@@ -94,11 +94,11 @@ export async function recordQuizResult(uid, termId, wasCorrect, currentMastery) 
   const nextReview = new Date()
   nextReview.setDate(nextReview.getDate() + daysUntilReview)
 
+  const entry = await dbHelpers.getWordBankEntry(uid, termId)
   await dbHelpers.updateWordBankEntry(uid, termId, {
     masteryLevel: newMastery,
     nextReviewAt: Timestamp.fromDate(nextReview),
-    quizAttempts: (await dbHelpers.getWordBank(uid)).find((w) => w.id === termId)
-      ?.quizAttempts + 1 || 1,
+    quizAttempts: (entry?.quizAttempts || 0) + 1,
   })
 
   return newMastery
