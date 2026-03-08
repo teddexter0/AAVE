@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { authHelpers, dbHelpers } from '../services/firebase'
+import { onSnapshot, doc } from 'firebase/firestore'
+import { authHelpers, dbHelpers, db } from '../services/firebase'
 
 export function useAuth() {
   const [user, setUser] = useState(null)
@@ -7,30 +8,40 @@ export function useAuth() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsub = authHelpers.onAuthStateChanged(async (firebaseUser) => {
-      try {
-        if (firebaseUser) {
-          setUser(firebaseUser)
-          const doc = await dbHelpers.getUserDoc(firebaseUser.uid)
-          setUserDoc(doc)
-        } else {
-          setUser(null)
-          setUserDoc(null)
-        }
-      } catch (err) {
-        console.error('Auth state error:', err)
-      } finally {
+    let unsubDoc = null
+
+    const unsubAuth = authHelpers.onAuthStateChanged(async (firebaseUser) => {
+      // Clean up previous doc subscription
+      if (unsubDoc) { unsubDoc(); unsubDoc = null }
+
+      if (firebaseUser) {
+        setUser(firebaseUser)
+        // Ensure user doc exists (handles new Google sign-in etc.)
+        try { await dbHelpers.ensureUserDoc(firebaseUser) } catch {}
+        // Real-time listener — keeps streak/wordsLookedUp/badges always fresh
+        unsubDoc = onSnapshot(
+          doc(db, 'users', firebaseUser.uid),
+          (snap) => {
+            setUserDoc(snap.exists() ? { id: snap.id, ...snap.data() } : null)
+            setLoading(false)
+          },
+          (err) => {
+            console.error('User doc subscription error:', err)
+            setLoading(false)
+          }
+        )
+      } else {
+        setUser(null)
+        setUserDoc(null)
         setLoading(false)
       }
     })
-    return unsub
+
+    return () => {
+      unsubAuth()
+      if (unsubDoc) unsubDoc()
+    }
   }, [])
 
-  const refreshUserDoc = async () => {
-    if (!user) return
-    const doc = await dbHelpers.getUserDoc(user.uid)
-    setUserDoc(doc)
-  }
-
-  return { user, userDoc, loading, refreshUserDoc }
+  return { user, userDoc, loading }
 }
