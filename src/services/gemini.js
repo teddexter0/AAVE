@@ -38,7 +38,7 @@ If the term is not AAVE or has no known AAVE meaning, return:
 { "error": "Term not found in AAVE lexicon" }
 If the term appears in the reference material below, use that as your primary source for meaning, context, and origin.`
 
-export async function lookupWithGemini(term) {
+export async function lookupWithGemini(term, _retries = 3) {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API key not configured')
   }
@@ -63,6 +63,12 @@ export async function lookupWithGemini(term) {
       },
     }),
   })
+
+  if (response.status === 429 && _retries > 0) {
+    const delay = 2000 * (4 - _retries) // 2s, 4s, 6s
+    await new Promise(r => setTimeout(r, delay))
+    return lookupWithGemini(term, _retries - 1)
+  }
 
   if (!response.ok) {
     throw new Error(`Gemini API error: ${response.status}`)
