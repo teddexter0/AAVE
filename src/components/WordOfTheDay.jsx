@@ -2,17 +2,35 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Star, Loader2 } from 'lucide-react'
 import { dbHelpers } from '../services/firebase'
+import { referenceDocuments } from '../data/referenceDocuments'
 import TermCard from './TermCard'
+
+function getDailyFallback() {
+  if (!referenceDocuments.length) return null
+  const dayOfYear = Math.floor(
+    (Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 86400000
+  )
+  const entry = referenceDocuments[dayOfYear % referenceDocuments.length]
+  return {
+    term: entry.word,
+    definition: entry.meaning,
+    example: entry.context || '',
+    origin: entry.origin || '',
+  }
+}
 
 export default function WordOfTheDay() {
   const [term, setTerm] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 4000) // bail out after 4s if Firebase hangs
+    const timer = setTimeout(() => {
+      setLoading(false)
+      setTerm(t => t ?? getDailyFallback())
+    }, 4000)
     dbHelpers.getWordOfTheDay()
-      .then(setTerm)
-      .catch(() => setTerm(null))
+      .then(result => setTerm(result ?? getDailyFallback()))
+      .catch(() => setTerm(getDailyFallback()))
       .finally(() => { clearTimeout(timer); setLoading(false) })
   }, [])
 
