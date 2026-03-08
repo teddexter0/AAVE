@@ -1,4 +1,4 @@
-[
+export const referenceDocuments = [
   {
     "word": "ride or die",
     "meaning": "Like a bodyguard and soulmate, meaning someone who is loyal to the end",
@@ -1667,4 +1667,4 @@
     "context": "",
     "origin": ""
   }
-]
+];
