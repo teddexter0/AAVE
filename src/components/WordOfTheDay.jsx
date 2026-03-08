@@ -7,12 +7,38 @@ import TermCard from './TermCard'
 
 const MS_PER_DAY = 86400000
 
+/** Fast 32-bit PRNG seeded by a number — deterministic, no two cycles same order */
+function seededRng(seed) {
+  let s = seed >>> 0
+  return () => {
+    s = Math.imul(s ^ (s >>> 15), s | 1)
+    s ^= s + Math.imul(s ^ (s >>> 7), s | 61)
+    return ((s ^ (s >>> 14)) >>> 0) / 0x100000000
+  }
+}
+
+/** Fisher-Yates shuffle using the given seed — returns a new array */
+function seededShuffle(arr, seed) {
+  const rand = seededRng(seed)
+  const out = [...arr]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
+}
+
 function getDailyFallback() {
   if (!referenceDocuments.length) return null
-  // Use days since Unix epoch so the cycle is continuous across year boundaries
-  // and each 278-day window covers every entry exactly once
+  const n = referenceDocuments.length
   const daysSinceEpoch = Math.floor(Date.now() / MS_PER_DAY)
-  const entry = referenceDocuments[daysSinceEpoch % referenceDocuments.length]
+  // Which full rotation through all n words are we on?
+  const cycle = Math.floor(daysSinceEpoch / n)
+  // Position within the current rotation
+  const pos = daysSinceEpoch % n
+  // Each cycle gets its own shuffle so the sequence never repeats identically
+  const shuffled = seededShuffle(referenceDocuments, cycle)
+  const entry = shuffled[pos]
   return {
     term: entry.word,
     definition: entry.meaning,

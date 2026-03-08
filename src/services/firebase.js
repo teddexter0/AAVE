@@ -153,6 +153,11 @@ export const dbHelpers = {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
   },
 
+  async getWordBankEntry(uid, termId) {
+    const snap = await getDoc(doc(db, 'users', uid, 'wordBank', termId))
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null
+  },
+
   async updateWordBankEntry(uid, termId, data) {
     await updateDoc(doc(db, 'users', uid, 'wordBank', termId), data)
   },
