@@ -47,6 +47,27 @@ function getDailyFallback() {
   }
 }
 
+const WOTD_CACHE_KEY = 'aave_wotd'
+
+function getCachedWotd() {
+  try {
+    const raw = localStorage.getItem(WOTD_CACHE_KEY)
+    if (!raw) return null
+    const { date, term } = JSON.parse(raw)
+    const today = new Date().toISOString().slice(0, 10)
+    return date === today ? term : null
+  } catch {
+    return null
+  }
+}
+
+function cacheWotd(term) {
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    localStorage.setItem(WOTD_CACHE_KEY, JSON.stringify({ date: today, term }))
+  } catch {}
+}
+
 export default function WordOfTheDay({ user }) {
   const [term, setTerm] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -54,13 +75,32 @@ export default function WordOfTheDay({ user }) {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    // Serve from localStorage cache if already computed today — no flicker, no network
+    const cached = getCachedWotd()
+    if (cached) {
+      setTerm(cached)
       setLoading(false)
-      setTerm(t => t ?? getDailyFallback())
+      return
+    }
+
+    const timer = setTimeout(() => {
+      const fallback = getDailyFallback()
+      setTerm(fallback)
+      cacheWotd(fallback)
+      setLoading(false)
     }, 4000)
+
     dbHelpers.getWordOfTheDay()
-      .then(result => setTerm(result ?? getDailyFallback()))
-      .catch(() => setTerm(getDailyFallback()))
+      .then(result => {
+        const word = result ?? getDailyFallback()
+        setTerm(word)
+        cacheWotd(word)
+      })
+      .catch(() => {
+        const fallback = getDailyFallback()
+        setTerm(fallback)
+        cacheWotd(fallback)
+      })
       .finally(() => { clearTimeout(timer); setLoading(false) })
   }, [])
 
