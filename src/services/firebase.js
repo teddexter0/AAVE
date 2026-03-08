@@ -89,6 +89,8 @@ export const dbHelpers = {
     const snap = await getDoc(ref)
     if (!snap.exists()) {
       await this.createUserDoc(user)
+      const fresh = await getDoc(ref)
+      return fresh.data()
     }
     return snap.data()
   },
