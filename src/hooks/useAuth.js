@@ -8,15 +8,20 @@ export function useAuth() {
 
   useEffect(() => {
     const unsub = authHelpers.onAuthStateChanged(async (firebaseUser) => {
-      if (firebaseUser) {
-        setUser(firebaseUser)
-        const doc = await dbHelpers.getUserDoc(firebaseUser.uid)
-        setUserDoc(doc)
-      } else {
-        setUser(null)
-        setUserDoc(null)
+      try {
+        if (firebaseUser) {
+          setUser(firebaseUser)
+          const doc = await dbHelpers.getUserDoc(firebaseUser.uid)
+          setUserDoc(doc)
+        } else {
+          setUser(null)
+          setUserDoc(null)
+        }
+      } catch (err) {
+        console.error('Auth state error:', err)
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     })
     return unsub
   }, [])

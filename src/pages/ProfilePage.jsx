@@ -22,12 +22,12 @@ export default function ProfilePage({ user, userDoc }) {
           <div className="flex items-center gap-4">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/20 border border-amber-500/30 shrink-0">
               <span className="text-2xl font-bold text-amber-400">
-                {(userDoc?.displayName || user.email || '?')[0].toUpperCase()}
+                {(userDoc?.displayName || user.displayName || user.email || '?')[0].toUpperCase()}
               </span>
             </div>
             <div className="min-w-0">
               <h1 className="text-xl font-bold text-white truncate">
-                {userDoc?.displayName || 'Anonymous'}
+                {userDoc?.displayName || user.displayName || 'Anonymous'}
               </h1>
               <div className="flex items-center gap-1.5 text-slate-400 text-sm mt-1">
                 <Mail size={13} />
