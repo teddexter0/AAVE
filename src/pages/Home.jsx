@@ -34,7 +34,7 @@ export default function Home({ user }) {
       </motion.div>
 
       {/* Word of the Day */}
-      <WordOfTheDay />
+      <WordOfTheDay user={user} />
     </main>
   )
 }
