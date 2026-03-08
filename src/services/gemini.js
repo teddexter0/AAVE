@@ -1,7 +1,29 @@
+import { referenceDocuments } from '../data/referenceDocuments'
+
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`
 
-const SYSTEM_PROMPT = `You are a culturally informed AAVE (African American Vernacular English) dictionary.
+function buildReferenceContext() {
+  const allEntries = referenceDocuments.flatMap((doc) => doc.entries || [])
+  if (allEntries.length === 0) return ''
+
+  const lines = ['\nReference material from community documents (treat these as authoritative):']
+  for (const doc of referenceDocuments) {
+    const entries = doc.entries || []
+    if (entries.length === 0) continue
+    lines.push(`\n[${doc.name}]`)
+    for (const e of entries) {
+      if (!e.word) continue
+      let line = `• ${e.word}: ${e.meaning || ''}`
+      if (e.context) line += ` | Context: ${e.context}`
+      if (e.origin) line += ` | Origin: ${e.origin}`
+      lines.push(line)
+    }
+  }
+  return lines.join('\n')
+}
+
+const BASE_PROMPT = `You are a culturally informed AAVE (African American Vernacular English) dictionary.
 When given a term, respond ONLY with a JSON object in this exact format:
 {
   "term": "the term as given",
@@ -13,12 +35,15 @@ When given a term, respond ONLY with a JSON object in this exact format:
 }
 Do not include markdown, preamble, or explanation. JSON only.
 If the term is not AAVE or has no known AAVE meaning, return:
-{ "error": "Term not found in AAVE lexicon" }`
+{ "error": "Term not found in AAVE lexicon" }
+If the term appears in the reference material below, use that as your primary source for meaning, context, and origin.`
 
 export async function lookupWithGemini(term) {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API key not configured')
   }
+
+  const systemPrompt = BASE_PROMPT + buildReferenceContext()
 
   const response = await fetch(GEMINI_URL, {
     method: 'POST',
@@ -27,7 +52,7 @@ export async function lookupWithGemini(term) {
       contents: [
         {
           parts: [
-            { text: SYSTEM_PROMPT },
+            { text: systemPrompt },
             { text: `Term to define: "${term}"` },
           ],
         },

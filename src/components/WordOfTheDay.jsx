@@ -9,10 +9,11 @@ export default function WordOfTheDay() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    const timer = setTimeout(() => setLoading(false), 4000) // bail out after 4s if Firebase hangs
     dbHelpers.getWordOfTheDay()
       .then(setTerm)
       .catch(() => setTerm(null))
-      .finally(() => setLoading(false))
+      .finally(() => { clearTimeout(timer); setLoading(false) })
   }, [])
 
   if (loading) {

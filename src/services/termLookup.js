@@ -11,15 +11,19 @@ import { lookupWithGemini } from './gemini'
  */
 export async function lookupTerm(rawTerm, uid = null) {
   const slug = rawTerm.trim().toLowerCase().replace(/\s+/g, '_')
-
-  // 1. Check Firestore
-  let termData = await dbHelpers.getTermBySlug(slug)
   let termId = slug
 
+  // 1. Check Firestore (skip silently if Firebase is offline/unconfigured)
+  let termData = null
+  try {
+    termData = await dbHelpers.getTermBySlug(slug)
+  } catch (err) {
+    console.warn('Firestore unavailable, falling back to AI:', err.message)
+  }
+
   if (termData) {
-    // Found in db — add to word bank if user is signed in
     if (uid) {
-      await dbHelpers.addToWordBank(uid, termId, termData.term)
+      try { await dbHelpers.addToWordBank(uid, termId, termData.term) } catch {}
     }
     return { termData, source: 'db', termId }
   }
@@ -31,12 +35,14 @@ export async function lookupTerm(rawTerm, uid = null) {
     return null // Not an AAVE term
   }
 
-  // 3. Auto-save AI result to Firestore
-  termId = await dbHelpers.saveTerm(termData)
-
-  // 4. Add to word bank
-  if (uid) {
-    await dbHelpers.addToWordBank(uid, termId, termData.term)
+  // 3. Auto-save AI result to Firestore (skip if offline)
+  try {
+    termId = await dbHelpers.saveTerm(termData)
+    if (uid) {
+      await dbHelpers.addToWordBank(uid, termId, termData.term)
+    }
+  } catch (err) {
+    console.warn('Could not save to Firestore (offline?):', err.message)
   }
 
   return { termData, source: 'ai', termId }
