@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Star, Loader2, BookmarkPlus, Check, Zap, CheckCircle, XCircle } from 'lucide-react'
+import { Star, Loader2, BookmarkPlus, Check, Zap, CheckCircle, XCircle, Lightbulb } from 'lucide-react'
 import { dbHelpers } from '../services/firebase'
+import { generateWordFact } from '../services/gemini'
 import { referenceDocuments } from '../data/referenceDocuments'
 import TermCard from './TermCard'
 
@@ -91,11 +92,22 @@ function cacheChallenge(correct) {
   } catch {}
 }
 
+function getUserSeed(user) {
+  if (user?.uid) return user.uid.slice(-6)
+  try {
+    let s = localStorage.getItem('aave_anon_seed')
+    if (!s) { s = Math.random().toString(36).slice(2, 8); localStorage.setItem('aave_anon_seed', s) }
+    return s
+  } catch { return 'x' }
+}
+
 export default function WordOfTheDay({ user }) {
   const [term, setTerm] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [fact, setFact] = useState(null)
+  const [factLoading, setFactLoading] = useState(false)
 
   // Challenge state
   const [challengePhase, setChallengePhase] = useState('idle') // idle | active | done
@@ -130,6 +142,16 @@ export default function WordOfTheDay({ user }) {
         if (challenge) { setChallengePhase('done'); setChallengeCorrect(challenge.correct) }
       })
   }, [])
+
+  // Fetch AI fact once term is known
+  useEffect(() => {
+    if (!term) return
+    setFactLoading(true)
+    generateWordFact(term.term, getUserSeed(user))
+      .then(setFact)
+      .catch(() => setFact(null))
+      .finally(() => setFactLoading(false))
+  }, [term?.term])
 
   const handleSave = async () => {
     if (!user || !term || saving || saved) return
@@ -206,6 +228,23 @@ export default function WordOfTheDay({ user }) {
       </div>
 
       <TermCard termData={term} source="db" />
+
+      {/* AI Fun Fact */}
+      {(factLoading || fact) && (
+        <div className="mt-4 rounded-xl border border-slate-700/40 bg-slate-800/50 px-4 py-3">
+          <div className="flex items-center gap-1.5 mb-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            <Lightbulb size={13} className="text-yellow-400" />
+            Fun Fact
+          </div>
+          {factLoading ? (
+            <div className="flex items-center gap-2 text-slate-500 text-xs">
+              <Loader2 size={12} className="animate-spin" /> Generating a fresh take…
+            </div>
+          ) : (
+            <p className="text-sm text-slate-300 leading-relaxed">{fact}</p>
+          )}
+        </div>
+      )}
 
       {/* Daily Challenge */}
       <AnimatePresence mode="wait">

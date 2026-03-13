@@ -43,6 +43,7 @@ export default function SearchBar({ user, onSearch }) {
       if (user) {
         await streakService.recordActivity(user.uid)
         await dbHelpers.addXP(user.uid, 2).catch(() => {})
+        await dbHelpers.updateRecentActivity(user.uid, 'added', res.term).catch(() => {})
 
         // Check and award badges based on wordsLookedUp count
         const userDoc = await dbHelpers.getUserDoc(user.uid)

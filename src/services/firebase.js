@@ -74,14 +74,18 @@ export const authHelpers = {
 export const dbHelpers = {
   // User document
   async createUserDoc(user) {
+    const displayName = user.displayName || ''
     await setDoc(doc(db, 'users', user.uid), {
-      displayName: user.displayName || '',
+      displayName,
+      displayNameLower: displayName.toLowerCase(),
       email: user.email || '',
       streak: 0,
       lastActiveDate: '',
       wordsLookedUp: 0,
       xp: 0,
       badges: [],
+      friends: [],      // array of { uid, displayName }
+      recentActivity: [], // array of { type, term, at } — last 5, public
       joinedAt: serverTimestamp(),
     })
   },
@@ -94,7 +98,15 @@ export const dbHelpers = {
       const fresh = await getDoc(ref)
       return fresh.data()
     }
-    return snap.data()
+    // Patch older docs missing new fields
+    const data = snap.data()
+    const patches = {}
+    if (data.displayNameLower === undefined) patches.displayNameLower = (data.displayName || '').toLowerCase()
+    if (data.friends === undefined) patches.friends = []
+    if (data.recentActivity === undefined) patches.recentActivity = []
+    if (data.xp === undefined) patches.xp = 0
+    if (Object.keys(patches).length) await updateDoc(ref, patches)
+    return { ...data, ...patches }
   },
 
   async getUserDoc(uid) {
@@ -197,6 +209,65 @@ export const dbHelpers = {
       query(collection(db, 'users'), orderBy('streak', 'desc'), limit(10))
     )
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+  },
+
+  // ─── Friends ────────────────────────────────────────────────────────────────
+
+  /** Prefix search by displayNameLower — returns up to 6 results, excludes self */
+  async searchUsers(queryStr, selfUid) {
+    const q = queryStr.toLowerCase().trim()
+    if (!q) return []
+    const snap = await getDocs(
+      query(
+        collection(db, 'users'),
+        where('displayNameLower', '>=', q),
+        where('displayNameLower', '<=', q + '\uf8ff'),
+        limit(6)
+      )
+    )
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((u) => u.id !== selfUid)
+  },
+
+  async addFriend(uid, friendUid, friendDisplayName) {
+    const ref = doc(db, 'users', uid)
+    const snap = await getDoc(ref)
+    if (!snap.exists()) return
+    const friends = snap.data().friends || []
+    if (friends.some((f) => f.uid === friendUid)) return // already added
+    await updateDoc(ref, { friends: [...friends, { uid: friendUid, displayName: friendDisplayName }] })
+  },
+
+  async removeFriend(uid, friendUid) {
+    const ref = doc(db, 'users', uid)
+    const snap = await getDoc(ref)
+    if (!snap.exists()) return
+    const friends = (snap.data().friends || []).filter((f) => f.uid !== friendUid)
+    await updateDoc(ref, { friends })
+  },
+
+  /** Fetch full user docs for a list of friend UIDs */
+  async getFriendsDocs(friendUids) {
+    if (!friendUids.length) return []
+    const results = await Promise.all(friendUids.map((uid) => this.getUserDoc(uid)))
+    return results.filter(Boolean)
+  },
+
+  /**
+   * Record an activity event publicly on the user doc (last 5 kept).
+   * type: 'added' | 'mastered' | 'reviewed'
+   */
+  async updateRecentActivity(uid, type, term) {
+    if (!term) return
+    const ref = doc(db, 'users', uid)
+    const snap = await getDoc(ref)
+    if (!snap.exists()) return
+    const current = snap.data().recentActivity || []
+    const entry = { type, term, at: new Date().toISOString() }
+    // Deduplicate same term+type then prepend, keep 5
+    const updated = [entry, ...current.filter((a) => !(a.term === term && a.type === type))].slice(0, 5)
+    await updateDoc(ref, { recentActivity: updated })
   },
 }
 
