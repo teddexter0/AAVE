@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { BookOpen, LayoutDashboard, User, LogOut, Menu, X, Medal } from 'lucide-react'
+import { BookOpen, LayoutDashboard, User, LogOut, Menu, X, Medal, Users } from 'lucide-react'
 import { authHelpers } from '../services/firebase'
 import AuthModal from './AuthModal'
 
@@ -15,6 +15,7 @@ export default function Navbar({ user }) {
     ...(user ? [
       { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/word-bank', label: 'My Words', icon: BookOpen },
+      { to: '/friends', label: 'Friends', icon: Users },
       { to: '/profile', label: 'Profile', icon: User },
     ] : []),
   ]

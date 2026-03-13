@@ -45,7 +45,10 @@ export default function QuizMode({ user, onFinish }) {
 
     // Update mastery level + award XP for correct answer
     await recordQuizResult(user.uid, q.termId, correct, q.masteryLevel)
-    if (correct) await dbHelpers.addXP(user.uid, 10).catch(() => {})
+    if (correct) {
+      await dbHelpers.addXP(user.uid, 10).catch(() => {})
+      await dbHelpers.updateRecentActivity(user.uid, 'mastered', q.term).catch(() => {})
+    }
 
     // Auto-advance after 1.2s
     setTimeout(async () => {

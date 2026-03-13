@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import WordBankPage from './pages/WordBankPage'
 import ProfilePage from './pages/ProfilePage'
 import Leaderboard from './pages/Leaderboard'
+import FriendsPage from './pages/FriendsPage'
 
 export default function App() {
   const { user, userDoc, loading } = useAuth()
@@ -40,6 +41,10 @@ export default function App() {
             element={user ? <ProfilePage user={user} userDoc={userDoc} /> : <Navigate to="/" replace />}
           />
           <Route path="/leaderboard" element={<Leaderboard user={user} />} />
+          <Route
+            path="/friends"
+            element={user ? <FriendsPage user={user} userDoc={userDoc} /> : <Navigate to="/" replace />}
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
