@@ -65,10 +65,14 @@ export default function Leaderboard({ user }) {
 
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-white truncate">
-                      {entry.displayName || 'Anonymous'}
+                      {entry.username
+                        ? <span className="font-mono text-amber-300">@{entry.username}</span>
+                        : (entry.displayName || 'Anonymous')}
                       {isYou && <span className="ml-2 text-xs text-amber-400 font-normal">(you)</span>}
                     </p>
-                    <p className="text-xs text-slate-400">{lvl.title}</p>
+                    <p className="text-xs text-slate-400">
+                      {entry.username && entry.displayName ? `${entry.displayName} · ` : ''}{lvl.title}
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-3 shrink-0">

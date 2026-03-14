@@ -10,8 +10,24 @@ import { dbHelpers } from '../services/firebase'
 function UsernameSection({ user, userDoc }) {
   const [editing, setEditing]     = useState(false)
   const [input, setInput]         = useState('')
-  const [status, setStatus]       = useState('idle') // idle|checking|available|taken|invalid|saving|saved|error
+  const [status, setStatus]       = useState('idle') // idle|checking|available|taken|invalid|saving|saved|error|quota
   const [statusMsg, setStatusMsg] = useState('')
+
+  // Compute quota state from userDoc
+  const changedAt = userDoc?.usernameChangedAt
+  const hasExistingUsername = !!userDoc?.username
+  let quotaActive = false
+  let quotaNextDate = ''
+  let quotaDaysLeft = 0
+  if (hasExistingUsername && changedAt) {
+    const msElapsed = Date.now() - (changedAt.toMillis?.() ?? new Date(changedAt).getTime())
+    quotaDaysLeft = Math.ceil((30 * 86400000 - msElapsed) / 86400000)
+    if (quotaDaysLeft > 0) {
+      quotaActive = true
+      quotaNextDate = new Date((changedAt.toMillis?.() ?? new Date(changedAt).getTime()) + 30 * 86400000)
+        .toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+    }
+  }
 
   // Debounce availability check as user types
   useEffect(() => {
@@ -55,7 +71,8 @@ function UsernameSection({ user, userDoc }) {
       setStatus('saved')
       setEditing(false)
     } catch (err) {
-      if (err.code === 'taken') { setStatus('taken'); setStatusMsg('That username is already taken.') }
+      if (err.code === 'taken')  { setStatus('taken');  setStatusMsg('That username is already taken.') }
+      else if (err.code === 'quota') { setStatus('quota'); setStatusMsg(err.message) }
       else { setStatus('error'); setStatusMsg('Something went wrong. Try again.') }
     }
   }
@@ -68,6 +85,7 @@ function UsernameSection({ user, userDoc }) {
     invalid:   'text-amber-400',
     checking:  'text-slate-400',
     error:     'text-red-400',
+    quota:     'text-amber-400',
   }[status] || ''
 
   const canSave = status === 'available' && input.trim() !== currentUsername
@@ -81,8 +99,14 @@ function UsernameSection({ user, userDoc }) {
         </div>
         {!editing && (
           <button
-            onClick={startEdit}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-600/50 px-3 py-1 text-xs text-slate-400 hover:text-white hover:border-amber-500/30 transition-colors"
+            onClick={quotaActive ? undefined : startEdit}
+            disabled={quotaActive}
+            title={quotaActive ? `Next change available ${quotaNextDate}` : undefined}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1 text-xs transition-colors ${
+              quotaActive
+                ? 'border-slate-700/40 text-slate-600 cursor-not-allowed'
+                : 'border-slate-600/50 text-slate-400 hover:text-white hover:border-amber-500/30'
+            }`}
           >
             <Pencil size={11} />
             {currentUsername ? 'Change' : 'Set username'}
@@ -95,6 +119,11 @@ function UsernameSection({ user, userDoc }) {
           <div>
             <p className="text-xl font-bold text-amber-400">@{currentUsername}</p>
             <p className="text-xs text-slate-500 mt-1">Friends can search for you with this handle.</p>
+            {quotaActive && (
+              <p className="text-xs text-amber-600/80 mt-1">
+                Next change available {quotaNextDate} ({quotaDaysLeft}d remaining)
+              </p>
+            )}
           </div>
         ) : (
           <div>
@@ -131,7 +160,7 @@ function UsernameSection({ user, userDoc }) {
           <div className="flex items-center gap-1.5 min-h-[16px]">
             {status === 'checking' && <Loader2 size={12} className="animate-spin text-slate-400" />}
             {status === 'available' && <Check size={12} className="text-emerald-400" />}
-            {(status === 'taken' || status === 'invalid' || status === 'error') && <X size={12} className="text-red-400" />}
+            {(status === 'taken' || status === 'invalid' || status === 'error' || status === 'quota') && <X size={12} className="text-red-400" />}
             {(statusMsg || status === 'available') && (
               <span className={`text-xs ${statusColor}`}>
                 {status === 'available' ? 'Available!' : statusMsg}

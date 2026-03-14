@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Loader2, AlertCircle } from 'lucide-react'
-import { lookupTerm } from '../services/termLookup'
+import { Search, Loader2, AlertCircle, ArrowRight } from 'lucide-react'
+import { lookupTerm, sanitiseInput } from '../services/termLookup'
 import { GeminiRateLimitError } from '../services/gemini'
 import { streakService } from '../services/streakService'
 import { dbHelpers } from '../services/firebase'
@@ -9,12 +9,14 @@ import { referenceDocuments } from '../data/referenceDocuments'
 import TermCard from './TermCard'
 
 const BADGE_LOOKUP = {
-  first_look:     { threshold: 1  },
-  word_collector: { threshold: 10 },
-  culture_scholar:{ threshold: 50 },
+  first_look:      { threshold: 1  },
+  word_collector:  { threshold: 10 },
+  culture_scholar: { threshold: 50 },
 }
 
-// ── Fuzzy helpers (mirrors termLookup, runs client-side for typeahead) ────────
+// ── Fuzzy typeahead (same de-elongation used in termLookup) ──────────────────
+
+function deElongate(s) { return s.replace(/(.)\1{2,}/g, '$1$1') }
 
 function editDistance(a, b) {
   const m = a.length, n = b.length
@@ -30,10 +32,7 @@ function editDistance(a, b) {
   return dp[m][n]
 }
 
-/** Normalise elongation: "slayyy" → "slayy", "driiip" → "driip" */
-const deElongate = (s) => s.replace(/(.)\1{2,}/g, '$1$1')
-
-function getSuggestions(rawQuery, limit = 5) {
+function getSuggestions(rawQuery, max = 5) {
   const q = deElongate(rawQuery.trim().toLowerCase())
   if (q.length < 2) return []
 
@@ -41,69 +40,65 @@ function getSuggestions(rawQuery, limit = 5) {
   for (const e of referenceDocuments) {
     if (!e.word) continue
     const c = deElongate(e.word.toLowerCase())
-
-    // Prefix match → best score
-    if (c.startsWith(q) || q.startsWith(c)) {
-      scored.push({ word: e.word, score: -1 })
-      continue
-    }
-
-    const maxLen = Math.max(q.length, c.length)
-    const dist = editDistance(q, c) / maxLen
+    if (c.startsWith(q) || q.startsWith(c)) { scored.push({ word: e.word, score: -1 }); continue }
+    const dist = editDistance(q, c) / Math.max(q.length, c.length)
     if (dist <= 0.5) scored.push({ word: e.word, score: dist })
   }
 
   scored.sort((a, b) => a.score - b.score)
-  // Deduplicate (edge case: two entries same word)
   const seen = new Set()
-  return scored.filter(r => { if (seen.has(r.word)) return false; seen.add(r.word); return true })
-              .slice(0, limit)
-              .map(r => r.word)
+  return scored.filter(r => !seen.has(r.word) && seen.add(r.word))
+               .slice(0, max).map(r => r.word)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function SearchBar({ user, onSearch }) {
-  const [query, setQuery] = useState('')
-  const [result, setResult] = useState(null)
-  const [status, setStatus] = useState('idle') // idle | loading | not_found | error
-  const [errorMsg, setErrorMsg] = useState('')
-  const [suggestions, setSuggestions] = useState([])
+  const [query,           setQuery]           = useState('')
+  const [result,          setResult]          = useState(null)
+  const [correctedFrom,   setCorrectedFrom]   = useState(null)
+  const [status,          setStatus]          = useState('idle')
+  const [errorMsg,        setErrorMsg]        = useState('')
+  const [suggestions,     setSuggestions]     = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
-  const inputRef = useRef(null)
+  const inputRef      = useRef(null)
   const suggestionsRef = useRef(null)
 
-  // Debounced typeahead suggestions
+  // Debounced typeahead
   useEffect(() => {
     if (!query.trim()) { setSuggestions([]); return }
-    const timer = setTimeout(() => {
-      setSuggestions(getSuggestions(query))
-    }, 120)
-    return () => clearTimeout(timer)
+    const t = setTimeout(() => setSuggestions(getSuggestions(query)), 120)
+    return () => clearTimeout(t)
   }, [query])
 
-  // Close suggestions on outside click
+  // Close dropdown on outside click
   useEffect(() => {
     const handler = (e) => {
-      if (!inputRef.current?.contains(e.target) && !suggestionsRef.current?.contains(e.target)) {
+      if (!inputRef.current?.contains(e.target) && !suggestionsRef.current?.contains(e.target))
         setShowSuggestions(false)
-      }
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const runSearch = async (term) => {
-    const trimmed = term.trim()
-    if (!trimmed) return
-    setQuery(trimmed)
+  const runSearch = async (raw) => {
+    const term = sanitiseInput(raw)
+    if (!term) return
+
+    setQuery(term)
     setShowSuggestions(false)
     setStatus('loading')
     setResult(null)
+    setCorrectedFrom(null)
     setErrorMsg('')
 
+    // ── Record streak on ANY search attempt ──────────────────────────────────
+    // Streaks measure daily engagement, not search success.
+    // This fires in the background so it never blocks the UI.
+    if (user) streakService.recordActivity(user.uid).catch(() => {})
+
     try {
-      const res = await lookupTerm(trimmed, user?.uid || null)
+      const res = await lookupTerm(term, user?.uid ?? null)
 
       if (!res) {
         setStatus('not_found')
@@ -111,12 +106,12 @@ export default function SearchBar({ user, onSearch }) {
       }
 
       setResult(res)
+      setCorrectedFrom(res.correctedFrom || null)
       setStatus('idle')
 
       if (user) {
-        await streakService.recordActivity(user.uid)
         await dbHelpers.addXP(user.uid, 2).catch(() => {})
-        await dbHelpers.updateRecentActivity(user.uid, 'added', res.termData?.term || trimmed).catch(() => {})
+        await dbHelpers.updateRecentActivity(user.uid, 'added', res.termData?.term || term).catch(() => {})
 
         const userDoc = await dbHelpers.getUserDoc(user.uid)
         const count = userDoc?.wordsLookedUp || 0
@@ -128,29 +123,28 @@ export default function SearchBar({ user, onSearch }) {
       onSearch?.()
     } catch (err) {
       console.error('Search error:', err)
-      setErrorMsg(
-        err instanceof GeminiRateLimitError
-          ? 'AI lookup is rate-limited right now. Wait a minute and try again, or check your spelling — the term might already be in our dictionary.'
-          : 'Something went wrong. Check your connection and try again.'
-      )
+      if (err instanceof GeminiRateLimitError) {
+        setErrorMsg(
+          'AI lookup is rate-limited right now. Most AAVE terms are available without AI — try the suggestions below or check your spelling.'
+        )
+      } else {
+        setErrorMsg('Something went wrong. Check your connection and try again.')
+      }
       setStatus('error')
     }
   }
 
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    runSearch(query)
-  }
+  const handleSubmit = (e) => { e.preventDefault(); runSearch(query) }
+
+  // Suggestions to show in the not-found state (pre-computed from current query)
+  const notFoundSuggestions = status === 'not_found' ? getSuggestions(query, 4) : []
 
   return (
     <div className="w-full">
-      <form onSubmit={handleSubmit} className="relative">
+      <form onSubmit={handleSubmit}>
         <div className="flex gap-2">
           <div className="relative flex-1">
-            <Search
-              size={18}
-              className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-            />
+            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input
               ref={inputRef}
               type="text"
@@ -159,6 +153,8 @@ export default function SearchBar({ user, onSearch }) {
               onFocus={() => setShowSuggestions(true)}
               placeholder="Search any AAVE term…"
               autoComplete="off"
+              spellCheck={false}
+              maxLength={60}
               className="w-full rounded-xl border border-slate-600 bg-[#1E293B] pl-11 pr-4 py-3.5 text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition-all text-base"
             />
 
@@ -167,10 +163,8 @@ export default function SearchBar({ user, onSearch }) {
               {showSuggestions && suggestions.length > 0 && (
                 <motion.ul
                   ref={suggestionsRef}
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.12 }}
+                  initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.12 }}
                   className="absolute z-50 mt-1.5 w-full rounded-xl border border-slate-700 bg-[#1E293B] shadow-xl overflow-hidden"
                 >
                   {suggestions.map((word) => (
@@ -194,63 +188,91 @@ export default function SearchBar({ user, onSearch }) {
             disabled={status === 'loading' || !query.trim()}
             className="flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-3.5 font-semibold text-slate-900 hover:bg-amber-400 transition-colors disabled:opacity-50"
           >
-            {status === 'loading' ? (
-              <Loader2 size={18} className="animate-spin" />
-            ) : (
-              <Search size={18} />
-            )}
-            <span className="hidden sm:inline">
-              {status === 'loading' ? 'Searching…' : 'Search'}
-            </span>
+            {status === 'loading'
+              ? <Loader2 size={18} className="animate-spin" />
+              : <Search size={18} />}
+            <span className="hidden sm:inline">{status === 'loading' ? 'Searching…' : 'Search'}</span>
           </button>
         </div>
       </form>
 
       <AnimatePresence mode="wait">
         {status === 'loading' && (
-          <motion.div
-            key="loading"
-            className="mt-6 flex items-center justify-center gap-3 text-slate-400"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          >
+          <motion.div key="loading" className="mt-6 flex items-center justify-center gap-3 text-slate-400"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <Loader2 size={20} className="animate-spin text-amber-500" />
             <span>Looking that up…</span>
           </motion.div>
         )}
 
         {status === 'not_found' && (
-          <motion.div
-            key="not_found"
-            className="mt-6 flex items-center gap-3 rounded-xl border border-slate-700/50 bg-[#1E293B] p-5 text-slate-300"
-            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          >
-            <AlertCircle size={20} className="shrink-0 text-amber-400" />
-            <div>
-              <p className="font-medium text-white">Term not found</p>
-              <p className="text-sm text-slate-400 mt-0.5">
-                "{query.trim()}" doesn't appear to be in the AAVE lexicon.
-              </p>
+          <motion.div key="not_found" className="mt-6 rounded-xl border border-slate-700/50 bg-[#1E293B] p-5"
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+            <div className="flex items-start gap-3">
+              <AlertCircle size={20} className="shrink-0 text-amber-400 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-medium text-white">Term not found</p>
+                <p className="text-sm text-slate-400 mt-0.5">
+                  "{query.trim()}" isn't in the AAVE lexicon we know of.
+                </p>
+                {notFoundSuggestions.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs text-slate-500 mb-2">Did you mean…</p>
+                    <div className="flex flex-wrap gap-2">
+                      {notFoundSuggestions.map((w) => (
+                        <button
+                          key={w}
+                          onClick={() => runSearch(w)}
+                          className="flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/5 px-3 py-1 text-xs text-amber-400 hover:bg-amber-500/10 transition-colors capitalize"
+                        >
+                          {w} <ArrowRight size={10} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </motion.div>
         )}
 
         {status === 'error' && (
-          <motion.div
-            key="error"
-            className="mt-6 flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/10 p-5 text-red-300"
-            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          >
-            <AlertCircle size={20} className="shrink-0" />
-            <p className="text-sm">{errorMsg}</p>
+          <motion.div key="error"
+            className="mt-6 rounded-xl border border-red-500/20 bg-red-500/10 p-5"
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+            <div className="flex items-start gap-3">
+              <AlertCircle size={20} className="shrink-0 text-red-400 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm text-red-300">{errorMsg}</p>
+                {suggestions.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {suggestions.slice(0, 4).map((w) => (
+                      <button
+                        key={w}
+                        onClick={() => runSearch(w)}
+                        className="flex items-center gap-1 rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:text-white transition-colors capitalize"
+                      >
+                        {w} <ArrowRight size={10} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </motion.div>
         )}
 
         {result && (
-          <motion.div
-            key="result"
-            className="mt-6"
-            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-          >
+          <motion.div key="result" className="mt-6"
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+            {/* Auto-correction banner */}
+            {correctedFrom && (
+              <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
+                <ArrowRight size={12} />
+                Showing results for <span className="font-semibold capitalize mx-1">"{result.termData.term}"</span>
+                — searched for "{correctedFrom}"
+              </div>
+            )}
             <TermCard termData={result.termData} source={result.source} />
             {!user && (
               <p className="mt-3 text-center text-sm text-slate-400">

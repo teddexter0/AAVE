@@ -2,7 +2,8 @@ import { dbHelpers } from './firebase'
 import { lookupWithGemini } from './gemini'
 import { referenceDocuments } from '../data/referenceDocuments'
 
-/** Levenshtein edit distance between two strings */
+// ── Fuzzy helpers ─────────────────────────────────────────────────────────────
+
 function editDistance(a, b) {
   const m = a.length, n = b.length
   const dp = Array.from({ length: m + 1 }, (_, i) => [i])
@@ -18,63 +19,93 @@ function editDistance(a, b) {
 }
 
 /**
- * Looks up a term in local referenceDocuments.
- * Accepts exact matches and fuzzy matches where normalised edit distance ≤ 0.35
- * (i.e. at least ~65% similar), so typos and minor variants still resolve.
+ * Collapse runs of 3+ identical chars to 2: "slayyy" → "slayy", "driiip" → "driip".
+ * This lets elongated slang match the dictionary form.
+ */
+const deElongate = (s) => s.replace(/(.)\1{2,}/g, '$1$1')
+
+/**
+ * Local fuzzy lookup against referenceDocuments.
+ * Applies de-elongation on both needle and candidate so "slayyy" → "slay" etc.
+ * Threshold: 0.45 (more forgiving of typos than the old 0.35).
  */
 function lookupInLocalData(rawTerm) {
-  const needle = rawTerm.trim().toLowerCase()
+  const raw    = rawTerm.trim().toLowerCase()
+  const needle = deElongate(raw)
+
+  // Exact match on original form first
+  for (const e of referenceDocuments) {
+    if (e.word && e.word.toLowerCase() === raw) {
+      return buildResult(e)
+    }
+  }
 
   let bestEntry = null
   let bestScore = Infinity
 
   for (const e of referenceDocuments) {
     if (!e.word) continue
-    const candidate = e.word.toLowerCase()
+    const candidate = deElongate(e.word.toLowerCase())
 
-    // Exact match — return immediately
-    if (candidate === needle) {
-      bestEntry = e
-      break
+    // Exact match after de-elongation
+    if (candidate === needle) { return buildResult(e) }
+
+    // Prefix match → cheap boost
+    if (candidate.startsWith(needle) || needle.startsWith(candidate)) {
+      const score = 0.1
+      if (score < bestScore) { bestScore = score; bestEntry = e }
+      continue
     }
 
-    // Fuzzy: normalised edit distance (0 = identical, 1 = completely different)
     const maxLen = Math.max(needle.length, candidate.length)
-    const dist = editDistance(needle, candidate)
-    const normDist = dist / maxLen
-
-    if (normDist < bestScore) {
-      bestScore = normDist
-      bestEntry = e
-    }
+    const dist   = editDistance(needle, candidate) / maxLen
+    if (dist < bestScore) { bestScore = dist; bestEntry = e }
   }
 
-  // Reject if best match is more than 35% different
-  if (!bestEntry || bestScore > 0.35) return null
+  if (!bestEntry || bestScore > 0.45) return null
+  return buildResult(bestEntry)
+}
 
+function buildResult(e) {
   return {
-    term: bestEntry.word,
-    definition: bestEntry.meaning,
-    example: bestEntry.context || '',
-    origin: bestEntry.origin || '',
-    related: [],
-    category: 'expression',
+    term:       e.word,
+    definition: e.meaning,
+    example:    e.context  || '',
+    origin:     e.origin   || '',
+    related:    [],
+    category:   'expression',
   }
 }
 
+// ── Input sanitisation ────────────────────────────────────────────────────────
+
 /**
- * Lookup order: Firestore → local referenceDocuments → Gemini AI
- * AI results are auto-saved back to Firestore.
- *
- * @param {string} rawTerm  — the term as the user typed it
- * @param {string|null} uid — authenticated user id (or null)
- * @returns {{ termData, source, termId } | null}
+ * Strip angle-bracket HTML, control characters, and enforce a 60-char cap.
+ * React already escapes output, but we sanitise input before it touches
+ * Firestore or is embedded in Gemini prompts (prompt-injection defence).
+ */
+export function sanitiseInput(raw) {
+  return raw
+    .replace(/<[^>]*>/g, '')          // no HTML tags
+    .replace(/[\x00-\x1F\x7F]/g, '') // no control chars
+    .trim()
+    .slice(0, 60)
+}
+
+// ── Main export ──────────────────────────────────────────────────────────────
+
+/**
+ * Lookup order: Firestore (exact slug) → local referenceDocuments (fuzzy) → Gemini
+ * Returns { termData, source, termId, correctedFrom? } or null.
+ * `correctedFrom` is set when the matched term differs from what the user typed,
+ * so the UI can show "Showing results for 'slay'" etc.
  */
 export async function lookupTerm(rawTerm, uid = null) {
-  const slug = rawTerm.trim().toLowerCase().replace(/\s+/g, '_')
-  let termId = slug
+  const clean  = sanitiseInput(rawTerm)
+  const slug   = clean.toLowerCase().replace(/\s+/g, '_')
+  let termId   = slug
 
-  // 1. Check Firestore (skip silently if Firebase is offline/unconfigured)
+  // 1. Exact Firestore lookup by slug
   let termData = null
   try {
     termData = await dbHelpers.getTermBySlug(slug)
@@ -83,44 +114,35 @@ export async function lookupTerm(rawTerm, uid = null) {
   }
 
   if (termData) {
-    if (uid) {
-      try { await dbHelpers.addToWordBank(uid, termId, termData.term) } catch {}
-    }
-    return { termData, source: 'db', termId }
+    if (uid) { try { await dbHelpers.addToWordBank(uid, termId, termData.term) } catch {} }
+    const correctedFrom = termData.term.toLowerCase() !== clean.toLowerCase() ? clean : null
+    return { termData, source: 'db', termId, correctedFrom }
   }
 
-  // 2. Check local referenceDocuments (no network, no rate limits)
-  termData = lookupInLocalData(rawTerm)
+  // 2. Local referenceDocuments — fuzzy + de-elongation
+  termData = lookupInLocalData(clean)
 
   if (termData) {
-    // Save to Firestore so it's available next time
     try {
       termId = await dbHelpers.saveTerm(termData)
-      if (uid) {
-        await dbHelpers.addToWordBank(uid, termId, termData.term)
-      }
+      if (uid) { await dbHelpers.addToWordBank(uid, termId, termData.term) }
     } catch (err) {
       console.warn('Could not save local term to Firestore:', err.message)
     }
-    return { termData, source: 'db', termId }
+    const correctedFrom = termData.term.toLowerCase() !== clean.toLowerCase() ? clean : null
+    return { termData, source: 'db', termId, correctedFrom }
   }
 
-  // 3. Fall back to Gemini AI
-  termData = await lookupWithGemini(rawTerm.trim())
+  // 3. Gemini AI fallback
+  termData = await lookupWithGemini(clean)
+  if (!termData) return null
 
-  if (!termData) {
-    return null // Not an AAVE term
-  }
-
-  // 3. Auto-save AI result to Firestore (skip if offline)
   try {
     termId = await dbHelpers.saveTerm(termData)
-    if (uid) {
-      await dbHelpers.addToWordBank(uid, termId, termData.term)
-    }
+    if (uid) { await dbHelpers.addToWordBank(uid, termId, termData.term) }
   } catch (err) {
     console.warn('Could not save to Firestore (offline?):', err.message)
   }
 
-  return { termData, source: 'ai', termId }
+  return { termData, source: 'ai', termId, correctedFrom: null }
 }
