@@ -1,7 +1,154 @@
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { User, Mail, Calendar, BookOpen, Flame, Trophy } from 'lucide-react'
+import { User, Mail, Calendar, BookOpen, Flame, Trophy, AtSign, Check, X, Loader2, Pencil } from 'lucide-react'
 import BadgeDisplay from '../components/BadgeDisplay'
 import StreakBadge from '../components/StreakBadge'
+import { dbHelpers } from '../services/firebase'
+
+// ── Username section ──────────────────────────────────────────────────────────
+
+function UsernameSection({ user, userDoc }) {
+  const [editing, setEditing]     = useState(false)
+  const [input, setInput]         = useState('')
+  const [status, setStatus]       = useState('idle') // idle|checking|available|taken|invalid|saving|saved|error
+  const [statusMsg, setStatusMsg] = useState('')
+
+  // Debounce availability check as user types
+  useEffect(() => {
+    if (!editing) return
+    const raw = input.trim()
+    if (!raw) { setStatus('idle'); setStatusMsg(''); return }
+
+    const formatErr = dbHelpers.validateUsername(raw)
+    if (formatErr) { setStatus('invalid'); setStatusMsg(formatErr); return }
+
+    setStatus('checking')
+    setStatusMsg('')
+    const timer = setTimeout(async () => {
+      try {
+        const available = await dbHelpers.checkUsernameAvailability(raw, user.uid)
+        setStatus(available ? 'available' : 'taken')
+        setStatusMsg(available ? '' : 'That username is already taken.')
+      } catch { setStatus('idle') }
+    }, 450)
+    return () => clearTimeout(timer)
+  }, [input, editing])
+
+  const startEdit = () => {
+    setInput(userDoc?.username || '')
+    setStatus('idle')
+    setStatusMsg('')
+    setEditing(true)
+  }
+
+  const cancel = () => setEditing(false)
+
+  const save = async () => {
+    const raw = input.trim()
+    const formatErr = dbHelpers.validateUsername(raw)
+    if (formatErr) { setStatus('invalid'); setStatusMsg(formatErr); return }
+    if (status === 'taken') return
+
+    setStatus('saving')
+    try {
+      await dbHelpers.setUsername(user.uid, raw)
+      setStatus('saved')
+      setEditing(false)
+    } catch (err) {
+      if (err.code === 'taken') { setStatus('taken'); setStatusMsg('That username is already taken.') }
+      else { setStatus('error'); setStatusMsg('Something went wrong. Try again.') }
+    }
+  }
+
+  const currentUsername = userDoc?.username
+
+  const statusColor = {
+    available: 'text-emerald-400',
+    taken:     'text-red-400',
+    invalid:   'text-amber-400',
+    checking:  'text-slate-400',
+    error:     'text-red-400',
+  }[status] || ''
+
+  const canSave = status === 'available' && input.trim() !== currentUsername
+
+  return (
+    <div className="rounded-2xl border border-slate-700/50 bg-[#1E293B] p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <AtSign size={16} className="text-amber-400" />
+          <h2 className="text-sm font-semibold text-white">Username</h2>
+        </div>
+        {!editing && (
+          <button
+            onClick={startEdit}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-600/50 px-3 py-1 text-xs text-slate-400 hover:text-white hover:border-amber-500/30 transition-colors"
+          >
+            <Pencil size={11} />
+            {currentUsername ? 'Change' : 'Set username'}
+          </button>
+        )}
+      </div>
+
+      {!editing ? (
+        currentUsername ? (
+          <div>
+            <p className="text-xl font-bold text-amber-400">@{currentUsername}</p>
+            <p className="text-xs text-slate-500 mt-1">Friends can search for you with this handle.</p>
+          </div>
+        ) : (
+          <div>
+            <p className="text-sm text-slate-400">No username set yet.</p>
+            <p className="text-xs text-slate-500 mt-0.5">Set one so friends can find you easily.</p>
+          </div>
+        )
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 font-mono font-bold text-lg">@</span>
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+              placeholder="your_handle"
+              maxLength={20}
+              autoFocus
+              className="flex-1 rounded-xl border border-slate-600 bg-[#0F172A] px-3 py-2 text-white font-mono placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+            />
+            <button
+              onClick={save}
+              disabled={!canSave || status === 'saving'}
+              className="flex items-center gap-1 rounded-xl bg-amber-500 px-3 py-2 text-xs font-semibold text-slate-900 hover:bg-amber-400 transition-colors disabled:opacity-40"
+            >
+              {status === 'saving' ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+              Save
+            </button>
+            <button onClick={cancel} className="rounded-xl border border-slate-600/50 px-3 py-2">
+              <X size={13} className="text-slate-400" />
+            </button>
+          </div>
+
+          {/* Status indicator */}
+          <div className="flex items-center gap-1.5 min-h-[16px]">
+            {status === 'checking' && <Loader2 size={12} className="animate-spin text-slate-400" />}
+            {status === 'available' && <Check size={12} className="text-emerald-400" />}
+            {(status === 'taken' || status === 'invalid' || status === 'error') && <X size={12} className="text-red-400" />}
+            {(statusMsg || status === 'available') && (
+              <span className={`text-xs ${statusColor}`}>
+                {status === 'available' ? 'Available!' : statusMsg}
+              </span>
+            )}
+          </div>
+
+          <p className="text-xs text-slate-500">
+            3–20 characters · letters, numbers, underscores only · case-insensitive · globally unique
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function ProfilePage({ user, userDoc }) {
   if (!user) {
@@ -29,6 +176,9 @@ export default function ProfilePage({ user, userDoc }) {
               <h1 className="text-xl font-bold text-white truncate">
                 {userDoc?.displayName || user.displayName || 'Anonymous'}
               </h1>
+              {userDoc?.username && (
+                <p className="text-amber-400 font-mono text-sm">@{userDoc.username}</p>
+              )}
               <div className="flex items-center gap-1.5 text-slate-400 text-sm mt-1">
                 <Mail size={13} />
                 <span className="truncate">{user.email}</span>
@@ -43,6 +193,9 @@ export default function ProfilePage({ user, userDoc }) {
           </div>
         </div>
 
+        {/* Username */}
+        <UsernameSection user={user} userDoc={userDoc} />
+
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-xl border border-slate-700/50 bg-[#1E293B] p-4 text-center">
@@ -53,7 +206,7 @@ export default function ProfilePage({ user, userDoc }) {
           <div className="rounded-xl border border-slate-700/50 bg-[#1E293B] p-4 text-center">
             <BookOpen size={20} className="mx-auto mb-1 text-blue-400" />
             <p className="text-2xl font-black text-white">{userDoc?.wordsLookedUp || 0}</p>
-            <p className="text-xs text-slate-400">Terms looked up</p>
+            <p className="text-xs text-slate-400">Terms in bank</p>
           </div>
           <div className="rounded-xl border border-slate-700/50 bg-[#1E293B] p-4 text-center">
             <Trophy size={20} className="mx-auto mb-1 text-amber-400" />
@@ -70,9 +223,7 @@ export default function ProfilePage({ user, userDoc }) {
 
         {/* Badges */}
         <div>
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">
-            Badges
-          </h2>
+          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Badges</h2>
           <BadgeDisplay earnedBadges={userDoc?.badges || []} />
         </div>
       </motion.div>

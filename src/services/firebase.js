@@ -13,6 +13,7 @@ import {
   orderBy,
   limit,
   increment,
+  runTransaction,
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore'
@@ -79,13 +80,14 @@ export const dbHelpers = {
       displayName,
       displayNameLower: displayName.toLowerCase(),
       email: user.email || '',
+      username: null,         // set separately via setUsername()
       streak: 0,
       lastActiveDate: '',
       wordsLookedUp: 0,
       xp: 0,
       badges: [],
-      friends: [],      // array of { uid, displayName }
-      recentActivity: [], // array of { type, term, at } — last 5, public
+      friends: [],
+      recentActivity: [],
       joinedAt: serverTimestamp(),
     })
   },
@@ -98,15 +100,80 @@ export const dbHelpers = {
       const fresh = await getDoc(ref)
       return fresh.data()
     }
-    // Patch older docs missing new fields
     const data = snap.data()
     const patches = {}
     if (data.displayNameLower === undefined) patches.displayNameLower = (data.displayName || '').toLowerCase()
     if (data.friends === undefined) patches.friends = []
     if (data.recentActivity === undefined) patches.recentActivity = []
     if (data.xp === undefined) patches.xp = 0
+    if (data.username === undefined) patches.username = null
     if (Object.keys(patches).length) await updateDoc(ref, patches)
     return { ...data, ...patches }
+  },
+
+  // ─── Username ────────────────────────────────────────────────────────────
+
+  /**
+   * Validate username format.
+   * Rules (industry standard — same as GitHub/Instagram):
+   *  • 3–20 characters
+   *  • Lowercase letters, digits, underscores only (no spaces, no @)
+   *  • Cannot start or end with underscore
+   *  • Cannot be all digits
+   */
+  validateUsername(raw) {
+    const u = raw.trim().toLowerCase()
+    if (u.length < 3 || u.length > 20) return 'Must be 3–20 characters.'
+    if (!/^[a-z0-9_]+$/.test(u))       return 'Only letters, numbers, and underscores.'
+    if (u.startsWith('_') || u.endsWith('_')) return 'Cannot start or end with an underscore.'
+    if (/^[0-9]+$/.test(u))            return 'Must contain at least one letter.'
+    return null // valid
+  },
+
+  /** Returns true if the username is already taken by someone else */
+  async checkUsernameAvailability(raw, selfUid) {
+    const u = raw.trim().toLowerCase()
+    const snap = await getDoc(doc(db, 'usernames', u))
+    if (!snap.exists()) return true           // free
+    return snap.data().uid === selfUid        // already mine → still "available"
+  },
+
+  /**
+   * Claim a new username atomically.
+   * - Validates format
+   * - Checks uniqueness inside a Firestore transaction
+   * - Releases old username if the user is changing it
+   * Throws with { code: 'taken' | 'invalid', message } on failure.
+   */
+  async setUsername(uid, raw) {
+    const u = raw.trim().toLowerCase()
+    const err = this.validateUsername(u)
+    if (err) throw Object.assign(new Error(err), { code: 'invalid' })
+
+    const userRef      = doc(db, 'users', uid)
+    const newHandleRef = doc(db, 'usernames', u)
+
+    await runTransaction(db, async (tx) => {
+      const userSnap   = await tx.get(userRef)
+      const handleSnap = await tx.get(newHandleRef)
+
+      if (!userSnap.exists()) throw new Error('User not found')
+
+      // Someone else owns this handle
+      if (handleSnap.exists() && handleSnap.data().uid !== uid) {
+        throw Object.assign(new Error('That username is already taken.'), { code: 'taken' })
+      }
+
+      // Release old handle if changing
+      const oldHandle = userSnap.data().username
+      if (oldHandle && oldHandle !== u) {
+        tx.delete(doc(db, 'usernames', oldHandle))
+      }
+
+      // Claim new handle
+      tx.set(newHandleRef, { uid, claimedAt: serverTimestamp() })
+      tx.update(userRef, { username: u })
+    })
   },
 
   async getUserDoc(uid) {
@@ -213,30 +280,45 @@ export const dbHelpers = {
 
   // ─── Friends ────────────────────────────────────────────────────────────────
 
-  /** Prefix search by displayNameLower — returns up to 6 results, excludes self */
+  /**
+   * Search users by username (exact) or display name (prefix).
+   * Username search runs first — @handles are the primary friend-discovery method.
+   */
   async searchUsers(queryStr, selfUid) {
-    const q = queryStr.toLowerCase().trim()
+    const q = queryStr.replace(/^@/, '').toLowerCase().trim()
     if (!q) return []
-    const snap = await getDocs(
-      query(
+
+    // Parallel: exact username match + display name prefix
+    const [usernameSnap, nameSnap] = await Promise.all([
+      getDocs(query(collection(db, 'users'), where('username', '==', q), limit(5))),
+      getDocs(query(
         collection(db, 'users'),
         where('displayNameLower', '>=', q),
         where('displayNameLower', '<=', q + '\uf8ff'),
-        limit(6)
-      )
-    )
-    return snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .filter((u) => u.id !== selfUid)
+        limit(5)
+      )),
+    ])
+
+    const seen = new Set()
+    const results = []
+    for (const d of [...usernameSnap.docs, ...nameSnap.docs]) {
+      if (d.id !== selfUid && !seen.has(d.id)) {
+        seen.add(d.id)
+        results.push({ id: d.id, ...d.data() })
+      }
+    }
+    return results.slice(0, 6)
   },
 
-  async addFriend(uid, friendUid, friendDisplayName) {
+  async addFriend(uid, friendUid, friendDisplayName, friendUsername = null) {
     const ref = doc(db, 'users', uid)
     const snap = await getDoc(ref)
     if (!snap.exists()) return
     const friends = snap.data().friends || []
-    if (friends.some((f) => f.uid === friendUid)) return // already added
-    await updateDoc(ref, { friends: [...friends, { uid: friendUid, displayName: friendDisplayName }] })
+    if (friends.some((f) => f.uid === friendUid)) return
+    await updateDoc(ref, {
+      friends: [...friends, { uid: friendUid, displayName: friendDisplayName, username: friendUsername }],
+    })
   },
 
   async removeFriend(uid, friendUid) {
