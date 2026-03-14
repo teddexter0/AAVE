@@ -80,7 +80,8 @@ export const dbHelpers = {
       displayName,
       displayNameLower: displayName.toLowerCase(),
       email: user.email || '',
-      username: null,         // set separately via setUsername()
+      username: null,             // set separately via setUsername()
+      usernameChangedAt: null,    // tracks 30-day change quota
       streak: 0,
       lastActiveDate: '',
       wordsLookedUp: 0,
@@ -107,6 +108,7 @@ export const dbHelpers = {
     if (data.recentActivity === undefined) patches.recentActivity = []
     if (data.xp === undefined) patches.xp = 0
     if (data.username === undefined) patches.username = null
+    if (data.usernameChangedAt === undefined) patches.usernameChangedAt = null
     if (Object.keys(patches).length) await updateDoc(ref, patches)
     return { ...data, ...patches }
   },
@@ -159,20 +161,36 @@ export const dbHelpers = {
 
       if (!userSnap.exists()) throw new Error('User not found')
 
+      const userData = userSnap.data()
+
       // Someone else owns this handle
       if (handleSnap.exists() && handleSnap.data().uid !== uid) {
         throw Object.assign(new Error('That username is already taken.'), { code: 'taken' })
       }
 
-      // Release old handle if changing
-      const oldHandle = userSnap.data().username
+      // 30-day change quota — only applies when *changing* an existing username
+      const oldHandle = userData.username
       if (oldHandle && oldHandle !== u) {
+        const changedAt = userData.usernameChangedAt
+        if (changedAt) {
+          const msElapsed = Date.now() - changedAt.toMillis()
+          const daysLeft  = Math.ceil((30 * 86400000 - msElapsed) / 86400000)
+          if (daysLeft > 0) {
+            const nextDate = new Date(changedAt.toMillis() + 30 * 86400000)
+              .toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+            throw Object.assign(
+              new Error(`You can change your username again on ${nextDate}.`),
+              { code: 'quota', daysLeft, nextDate }
+            )
+          }
+        }
+        // Release old handle
         tx.delete(doc(db, 'usernames', oldHandle))
       }
 
       // Claim new handle
       tx.set(newHandleRef, { uid, claimedAt: serverTimestamp() })
-      tx.update(userRef, { username: u })
+      tx.update(userRef, { username: u, usernameChangedAt: serverTimestamp() })
     })
   },
 

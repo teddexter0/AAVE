@@ -99,6 +99,7 @@ export default function FriendsPage({ user, userDoc }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
+  const [searchAttempted, setSearchAttempted] = useState(false)
   const [friendsDocs, setFriendsDocs] = useState([])
   const [loadingFriends, setLoadingFriends] = useState(true)
   const [removingUid, setRemovingUid] = useState(null)
@@ -119,6 +120,7 @@ export default function FriendsPage({ user, userDoc }) {
     if (!searchQuery.trim()) return
     setSearching(true)
     setSearchResults([])
+    setSearchAttempted(false)
     try {
       const results = await dbHelpers.searchUsers(searchQuery, user.uid)
       setSearchResults(results)
@@ -126,6 +128,7 @@ export default function FriendsPage({ user, userDoc }) {
       console.error(err)
     } finally {
       setSearching(false)
+      setSearchAttempted(true)
     }
   }
 
@@ -196,7 +199,7 @@ export default function FriendsPage({ user, userDoc }) {
           </form>
 
           <AnimatePresence>
-            {searchResults.length > 0 && (
+            {(searchResults.length > 0 || (searchAttempted && !searching)) && (
               <motion.div
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -240,8 +243,13 @@ export default function FriendsPage({ user, userDoc }) {
                     </div>
                   )
                 })}
-                {searchResults.length === 0 && !searching && (
-                  <p className="text-sm text-slate-500 py-2">No users found.</p>
+                {searchResults.length === 0 && !searching && searchAttempted && (
+                  <div className="rounded-xl border border-slate-700/40 bg-[#1E293B] px-4 py-4 text-sm text-slate-400">
+                    <p className="font-medium text-white">No users found.</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Try searching by exact @username or display name. Note: you can't find your own account in search.
+                    </p>
+                  </div>
                 )}
               </motion.div>
             )}
