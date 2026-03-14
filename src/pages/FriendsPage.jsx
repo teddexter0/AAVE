@@ -43,7 +43,10 @@ function FriendCard({ friend, onRemove, isRemoving }) {
           <div className="flex items-center justify-between gap-2">
             <div>
               <p className="font-semibold text-white truncate">{friend.displayName || 'Anonymous'}</p>
-              <p className="text-xs text-slate-400">{lvl.title}</p>
+              <p className="text-xs text-slate-400">
+                {friend.username && <span className="text-amber-400/70 font-mono">@{friend.username} · </span>}
+                {lvl.title}
+              </p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
               <span className="flex items-center gap-1 text-orange-400 text-sm font-bold">
@@ -129,7 +132,7 @@ export default function FriendsPage({ user, userDoc }) {
   const addFriend = async (friendDoc) => {
     setAddingUid(friendDoc.id)
     try {
-      await dbHelpers.addFriend(user.uid, friendDoc.id, friendDoc.displayName)
+      await dbHelpers.addFriend(user.uid, friendDoc.id, friendDoc.displayName, friendDoc.username || null)
     } catch (err) {
       console.error(err)
     } finally {
@@ -179,7 +182,7 @@ export default function FriendsPage({ user, userDoc }) {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name…"
+              placeholder="Search by @username or name…"
               className="flex-1 rounded-xl border border-slate-700/50 bg-[#1E293B] px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500/50"
             />
             <button
@@ -216,7 +219,10 @@ export default function FriendsPage({ user, userDoc }) {
                         </div>
                         <div>
                           <p className="text-sm font-medium text-white">{u.displayName || 'Anonymous'}</p>
-                          <p className="text-xs text-slate-500">{lvl.title} · 🔥 {u.streak || 0}</p>
+                          <p className="text-xs text-slate-500">
+                            {u.username ? <span className="text-amber-400/70 font-mono">@{u.username} · </span> : ''}
+                            {lvl.title} · 🔥 {u.streak || 0}
+                          </p>
                         </div>
                       </div>
                       <button

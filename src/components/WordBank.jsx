@@ -1,13 +1,24 @@
 import { motion } from 'framer-motion'
 import { BookOpen, Clock, Brain } from 'lucide-react'
 
-const MASTERY_LABELS = ['New', 'Seen', 'Quizzed', 'Mastered']
+// Mastery reflects quiz progress — 0 = never quizzed, not "new"
+const MASTERY_LABELS = ['Unquizzed', 'Learning', 'Practiced', 'Mastered']
 const MASTERY_COLORS = [
   'bg-slate-500/20 text-slate-400',
   'bg-blue-500/20 text-blue-400',
   'bg-amber-500/20 text-amber-400',
   'bg-green-500/20 text-green-400',
 ]
+
+const MS_24H = 86400000
+
+/** Returns true if the Firestore Timestamp was within the last 24 hours */
+function isNew(lookedUpAt) {
+  try {
+    const d = lookedUpAt?.toDate?.()
+    return d && Date.now() - d.getTime() < MS_24H
+  } catch { return false }
+}
 
 export default function WordBank({ words, onQuizMe, loading }) {
   if (loading) {
@@ -64,6 +75,12 @@ export default function WordBank({ words, onQuizMe, loading }) {
             <div className="flex items-center gap-3 min-w-0">
               <BookOpen size={16} className="shrink-0 text-amber-500" />
               <span className="font-medium text-white truncate capitalize">{entry.term}</span>
+              {/* "New" only shows if actually added in last 24 hours */}
+              {isNew(entry.lookedUpAt) && (
+                <span className="hidden sm:inline rounded-full px-2 py-0.5 text-xs font-semibold bg-emerald-500/20 text-emerald-400">
+                  New
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-3 shrink-0 ml-3">
               <span className={`hidden sm:inline rounded-full px-2.5 py-0.5 text-xs font-medium ${MASTERY_COLORS[entry.masteryLevel || 0]}`}>
