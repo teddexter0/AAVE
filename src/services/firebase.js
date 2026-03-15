@@ -26,6 +26,7 @@ import {
   GoogleAuthProvider,
   signOut,
   updateProfile,
+  sendPasswordResetEmail,
 } from 'firebase/auth'
 
 const firebaseConfig = {
@@ -56,6 +57,10 @@ export const authHelpers = {
   async signIn(email, password) {
     const cred = await signInWithEmailAndPassword(auth, email, password)
     return cred.user
+  },
+
+  async sendPasswordReset(email) {
+    await sendPasswordResetEmail(auth, email)
   },
 
   async signInWithGoogle() {

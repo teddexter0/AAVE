@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Loader2, AlertCircle, ArrowRight } from 'lucide-react'
 import { lookupTerm, sanitiseInput } from '../services/termLookup'
-import { GeminiRateLimitError } from '../services/gemini'
+import { isGeminiRateLimited } from '../services/gemini'
 import { streakService } from '../services/streakService'
 import { dbHelpers } from '../services/firebase'
 import { referenceDocuments } from '../data/referenceDocuments'
@@ -123,13 +123,7 @@ export default function SearchBar({ user, onSearch }) {
       onSearch?.()
     } catch (err) {
       console.error('Search error:', err)
-      if (err instanceof GeminiRateLimitError) {
-        setErrorMsg(
-          'AI lookup is rate-limited right now. Most AAVE terms are available without AI — try the suggestions below or check your spelling.'
-        )
-      } else {
-        setErrorMsg('Something went wrong. Check your connection and try again.')
-      }
+      setErrorMsg('Something went wrong. Check your connection and try again.')
       setStatus('error')
     }
   }
@@ -214,6 +208,11 @@ export default function SearchBar({ user, onSearch }) {
                 <p className="font-medium text-white">Term not found</p>
                 <p className="text-sm text-slate-400 mt-0.5">
                   "{query.trim()}" isn't in the AAVE lexicon we know of.
+                  {isGeminiRateLimited() && (
+                    <span className="block mt-1 text-xs text-slate-500">
+                      AI lookup is taking a breather — local results only right now. Try again in a minute.
+                    </span>
+                  )}
                 </p>
                 {notFoundSuggestions.length > 0 && (
                   <div className="mt-3">
