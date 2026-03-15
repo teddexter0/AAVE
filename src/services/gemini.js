@@ -1,24 +1,49 @@
+/**
+ * AI service — Claude (Anthropic) primary, Gemini fallback.
+ *
+ * Strategy:
+ *  1. Check localStorage cache — no API call if term was looked up before (7-day TTL)
+ *  2. Try Claude (claude-haiku — fast, cheap, high rate limits)
+ *  3. If Claude fails (rate limit / key missing / error), try Gemini
+ *  4. If both fail, throw GeminiRateLimitError so callers degrade gracefully
+ *
+ * Each provider has its own 60-second client-side cooldown after a 429.
+ * isGeminiRateLimited() returns true only when BOTH providers are in cooldown.
+ *
+ * Env vars needed in Vercel:
+ *   VITE_ANTHROPIC_API_KEY   — primary
+ *   VITE_GEMINI_API_KEY      — fallback
+ */
+
 import { referenceDocuments } from '../data/referenceDocuments'
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`
+// ── Provider config ───────────────────────────────────────────────────────────
 
-// ── Client-side rate-limit cooldown ──────────────────────────────────────────
-// After a 429 we skip Gemini for 60 seconds so we stop hammering the free tier.
+const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
+const GEMINI_KEY    = import.meta.env.VITE_GEMINI_API_KEY
+
+const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
+const GEMINI_URL    = GEMINI_KEY
+  ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`
+  : null
+
+// ── Per-provider rate-limit cooldowns (60s after a 429) ──────────────────────
+
 const RATE_LIMIT_COOLDOWN_MS = 60_000
-let rateLimitUntil = 0
+let claudeRateLimitUntil = 0
+let geminiRateLimitUntil = 0
 
+function isClaudeRateLimited() { return Date.now() < claudeRateLimitUntil }
+function isGeminiProviderLimited() { return Date.now() < geminiRateLimitUntil }
+
+/** True when ALL AI providers are on cooldown — callers show soft "AI paused" note. */
 export function isGeminiRateLimited() {
-  return Date.now() < rateLimitUntil
+  return isClaudeRateLimited() && isGeminiProviderLimited()
 }
 
-function markRateLimited() {
-  rateLimitUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS
-}
+// ── Shared lookup cache (localStorage, 7-day TTL) ────────────────────────────
 
-// ── Per-term lookup cache (localStorage, 7-day TTL) ──────────────────────────
-// Successful Gemini lookups are cached so repeat searches never hit the API.
-const LOOKUP_CACHE_TTL = 7 * 24 * 60 * 60 * 1000  // 7 days
+const LOOKUP_CACHE_TTL = 7 * 24 * 60 * 60 * 1000
 
 function termCacheKey(term) {
   return `aave_lookup_${term.toLowerCase().replace(/\s+/g, '_')}`
@@ -31,9 +56,7 @@ function getCachedLookup(term) {
     const { data, savedAt } = JSON.parse(raw)
     if (Date.now() - savedAt > LOOKUP_CACHE_TTL) return null
     return data
-  } catch {
-    return null
-  }
+  } catch { return null }
 }
 
 function setCachedLookup(term, data) {
@@ -42,16 +65,11 @@ function setCachedLookup(term, data) {
   } catch {}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Shared prompt ─────────────────────────────────────────────────────────────
 
-/**
- * referenceDocuments is a flat array of {word, meaning, context, origin}.
- * Fixed: previous version incorrectly assumed each item had an .entries sub-array,
- * causing the reference context to always be empty.
- */
 function buildReferenceContext() {
   if (!referenceDocuments.length) return ''
-  const lines = ['\nReference material from community documents (treat these as authoritative):']
+  const lines = ['\nReference material (treat as authoritative):']
   for (const e of referenceDocuments) {
     if (!e.word) continue
     let line = `• ${e.word}: ${e.meaning || ''}`
@@ -75,15 +93,83 @@ When given a term, respond ONLY with a JSON object in this exact format:
 Do not include markdown, preamble, or explanation. JSON only.
 If the term is not AAVE or has no known AAVE meaning, return:
 { "error": "Term not found in AAVE lexicon" }
-If the term appears in the reference material below, use that as your primary source for meaning, context, and origin.`
+If the term appears in the reference material below, use that as your primary source.`
+
+// ── Error class (kept for backwards compat with termLookup + SearchBar) ───────
 
 export class GeminiRateLimitError extends Error {
-  constructor() { super('rate_limited') }
+  constructor(msg = 'all_providers_rate_limited') { super(msg) }
 }
 
-async function callGemini(prompt, temperature = 0.3, maxTokens = 512) {
-  if (!GEMINI_API_KEY) throw new Error('Gemini API key not configured')
+// ── Provider: Claude ──────────────────────────────────────────────────────────
 
+async function callClaude(prompt, temperature = 0.3, maxTokens = 512) {
+  if (!ANTHROPIC_KEY) {
+    console.warn('[AI] Claude: VITE_ANTHROPIC_API_KEY not set — skipping')
+    throw new Error('claude_key_missing')
+  }
+  if (isClaudeRateLimited()) {
+    const secsLeft = Math.ceil((claudeRateLimitUntil - Date.now()) / 1000)
+    console.warn(`[AI] Claude: rate-limit cooldown active (${secsLeft}s remaining)`)
+    throw new Error('claude_rate_limited')
+  }
+
+  console.info('[AI] Claude: calling API…')
+  const response = await fetch(ANTHROPIC_URL, {
+    method: 'POST',
+    headers: {
+      'content-type':                          'application/json',
+      'x-api-key':                             ANTHROPIC_KEY,
+      'anthropic-version':                     '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: maxTokens,
+      temperature,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  })
+
+  if (response.status === 429) {
+    claudeRateLimitUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS
+    console.warn('[AI] Claude: 429 — cooldown set for 60s')
+    throw new Error('claude_rate_limited')
+  }
+  if (response.status === 401) {
+    console.error('[AI] Claude: 401 Unauthorized — check VITE_ANTHROPIC_API_KEY in Vercel env vars')
+    throw new Error('claude_unauthorized')
+  }
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    console.error(`[AI] Claude: HTTP ${response.status}`, body)
+    throw new Error(`claude_http_${response.status}`)
+  }
+
+  const data  = await response.json()
+  const text  = data?.content?.[0]?.text
+  if (!text) {
+    console.error('[AI] Claude: empty response body', data)
+    throw new Error('claude_empty_response')
+  }
+  console.info('[AI] Claude: success')
+  return text
+}
+
+// ── Provider: Gemini ──────────────────────────────────────────────────────────
+
+async function callGemini(prompt, temperature = 0.3, maxTokens = 512) {
+  if (!GEMINI_KEY) {
+    console.warn('[AI] Gemini: VITE_GEMINI_API_KEY not set — skipping')
+    throw new Error('gemini_key_missing')
+  }
+  if (isGeminiProviderLimited()) {
+    const secsLeft = Math.ceil((geminiRateLimitUntil - Date.now()) / 1000)
+    console.warn(`[AI] Gemini: rate-limit cooldown active (${secsLeft}s remaining)`)
+    throw new Error('gemini_rate_limited')
+  }
+
+  console.info('[AI] Gemini: calling API…')
   const response = await fetch(GEMINI_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -94,48 +180,87 @@ async function callGemini(prompt, temperature = 0.3, maxTokens = 512) {
   })
 
   if (response.status === 429) {
-    markRateLimited()
-    throw new GeminiRateLimitError()
+    geminiRateLimitUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS
+    console.warn('[AI] Gemini: 429 — cooldown set for 60s')
+    throw new Error('gemini_rate_limited')
   }
-  if (!response.ok) throw new Error(`Gemini API error: ${response.status}`)
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    console.error(`[AI] Gemini: HTTP ${response.status}`, body)
+    throw new Error(`gemini_http_${response.status}`)
+  }
 
   const data = await response.json()
-  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!raw) throw new Error('Empty response from Gemini')
-  return raw
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) {
+    console.error('[AI] Gemini: empty response body', data)
+    throw new Error('gemini_empty_response')
+  }
+  console.info('[AI] Gemini: success')
+  return text
 }
 
-export async function lookupWithGemini(term) {
-  // Return from local cache first — no API call needed
-  const cached = getCachedLookup(term)
-  if (cached) return cached
+// ── Unified AI caller: Claude → Gemini fallback ───────────────────────────────
 
-  // Respect the client-side cooldown after a 429
+async function callAI(prompt, temperature = 0.3, maxTokens = 512) {
+  // Try Claude first
+  try {
+    return { text: await callClaude(prompt, temperature, maxTokens), provider: 'claude' }
+  } catch (claudeErr) {
+    console.warn(`[AI] Claude failed (${claudeErr.message}), trying Gemini fallback…`)
+  }
+
+  // Fallback to Gemini
+  try {
+    return { text: await callGemini(prompt, temperature, maxTokens), provider: 'gemini' }
+  } catch (geminiErr) {
+    console.error(`[AI] Gemini also failed (${geminiErr.message}). Both providers unavailable.`)
+    throw new GeminiRateLimitError('all_providers_failed')
+  }
+}
+
+function parseJSON(raw) {
+  const cleaned = raw.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
+  return JSON.parse(cleaned)
+}
+
+// ── Public exports ────────────────────────────────────────────────────────────
+
+export async function lookupWithGemini(term) {
+  // 1. Check cache — avoids any API call for previously looked-up terms
+  const cached = getCachedLookup(term)
+  if (cached) {
+    console.info(`[AI] Cache hit for "${term}"`)
+    return cached
+  }
+
+  // 2. Both providers in cooldown — skip API entirely
   if (isGeminiRateLimited()) throw new GeminiRateLimitError()
 
   const systemPrompt = BASE_PROMPT + buildReferenceContext()
   const fullPrompt   = `${systemPrompt}\n\nTerm to define: "${term}"`
 
-  const raw     = await callGemini(fullPrompt, 0.3, 512)
-  const cleaned = raw.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
-  const parsed  = JSON.parse(cleaned)
+  const { text, provider } = await callAI(fullPrompt, 0.3, 512)
+  const parsed = parseJSON(text)
 
-  if (parsed.error) return null
+  if (parsed.error) {
+    console.info(`[AI] ${provider}: term not in AAVE lexicon — "${term}"`)
+    return null
+  }
 
   const result = { ...parsed, source: 'ai' }
-  setCachedLookup(term, result)  // cache so same term never hits the API again
+  setCachedLookup(term, result)
   return result
 }
 
 /**
  * Generates a fresh, humorous daily fact about a word.
- * - Cached in localStorage by term + local date so it doesn't regenerate on reload.
- * - userSeed nudges Gemini to vary output across users.
- * - seenFacts list (stored locally) tells Gemini what NOT to repeat.
+ * Cached per term per local calendar day so it never regenerates on reload.
+ * userSeed nudges the model to vary output across users.
  */
 export async function generateWordFact(term, userSeed = '') {
-  if (!GEMINI_API_KEY) return null
-  if (isGeminiRateLimited()) return null   // silently skip — don't add to user noise
+  if (!ANTHROPIC_KEY && !GEMINI_KEY) return null
+  if (isGeminiRateLimited()) return null  // all AI paused — silently skip
 
   const slug     = term.toLowerCase().replace(/\s+/g, '_')
   const cacheKey = `aave_fact_${slug}`
@@ -146,13 +271,11 @@ export async function generateWordFact(term, userSeed = '') {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   })()
 
-  // Return today's cached fact if it exists
   try {
     const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null')
     if (cached?.date === today) return cached.fact
   } catch {}
 
-  // Load past facts to tell Gemini not to repeat them
   let seenFacts = []
   try { seenFacts = JSON.parse(localStorage.getItem(seenKey) || '[]') } catch {}
 
@@ -167,14 +290,12 @@ Return ONLY the fact text — no quotes, no preamble.${avoidClause}
 Variation key: ${userSeed || 'default'}`
 
   try {
-    const fact = (await callGemini(prompt, 0.9, 200)).trim()
+    const { text } = await callAI(prompt, 0.9, 200)
+    const fact = text.trim()
     if (!fact) return null
 
     try { localStorage.setItem(cacheKey, JSON.stringify({ fact, date: today })) } catch {}
-    try {
-      localStorage.setItem(seenKey, JSON.stringify([fact, ...seenFacts].slice(0, 5)))
-    } catch {}
-
+    try { localStorage.setItem(seenKey, JSON.stringify([fact, ...seenFacts].slice(0, 5))) } catch {}
     return fact
   } catch {
     return null
