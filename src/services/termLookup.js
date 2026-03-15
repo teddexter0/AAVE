@@ -1,5 +1,5 @@
 import { dbHelpers } from './firebase'
-import { lookupWithGemini } from './gemini'
+import { lookupWithGemini, GeminiRateLimitError } from './gemini'
 import { referenceDocuments } from '../data/referenceDocuments'
 
 // ── Fuzzy helpers ─────────────────────────────────────────────────────────────
@@ -134,7 +134,16 @@ export async function lookupTerm(rawTerm, uid = null) {
   }
 
   // 3. Gemini AI fallback
-  termData = await lookupWithGemini(clean)
+  try {
+    termData = await lookupWithGemini(clean)
+  } catch (err) {
+    if (err instanceof GeminiRateLimitError) {
+      // AI is paused — treat as not found (callers check isGeminiRateLimited() for the soft note)
+      return null
+    }
+    throw err
+  }
+
   if (!termData) return null
 
   try {

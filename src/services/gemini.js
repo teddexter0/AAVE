@@ -3,6 +3,47 @@ import { referenceDocuments } from '../data/referenceDocuments'
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`
 
+// ── Client-side rate-limit cooldown ──────────────────────────────────────────
+// After a 429 we skip Gemini for 60 seconds so we stop hammering the free tier.
+const RATE_LIMIT_COOLDOWN_MS = 60_000
+let rateLimitUntil = 0
+
+export function isGeminiRateLimited() {
+  return Date.now() < rateLimitUntil
+}
+
+function markRateLimited() {
+  rateLimitUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS
+}
+
+// ── Per-term lookup cache (localStorage, 7-day TTL) ──────────────────────────
+// Successful Gemini lookups are cached so repeat searches never hit the API.
+const LOOKUP_CACHE_TTL = 7 * 24 * 60 * 60 * 1000  // 7 days
+
+function termCacheKey(term) {
+  return `aave_lookup_${term.toLowerCase().replace(/\s+/g, '_')}`
+}
+
+function getCachedLookup(term) {
+  try {
+    const raw = localStorage.getItem(termCacheKey(term))
+    if (!raw) return null
+    const { data, savedAt } = JSON.parse(raw)
+    if (Date.now() - savedAt > LOOKUP_CACHE_TTL) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
+function setCachedLookup(term, data) {
+  try {
+    localStorage.setItem(termCacheKey(term), JSON.stringify({ data, savedAt: Date.now() }))
+  } catch {}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * referenceDocuments is a flat array of {word, meaning, context, origin}.
  * Fixed: previous version incorrectly assumed each item had an .entries sub-array,
@@ -15,7 +56,7 @@ function buildReferenceContext() {
     if (!e.word) continue
     let line = `• ${e.word}: ${e.meaning || ''}`
     if (e.context) line += ` | Context: ${e.context}`
-    if (e.origin) line += ` | Origin: ${e.origin}`
+    if (e.origin)  line += ` | Origin: ${e.origin}`
     lines.push(line)
   }
   return lines.join('\n')
@@ -52,7 +93,10 @@ async function callGemini(prompt, temperature = 0.3, maxTokens = 512) {
     }),
   })
 
-  if (response.status === 429) throw new GeminiRateLimitError()
+  if (response.status === 429) {
+    markRateLimited()
+    throw new GeminiRateLimitError()
+  }
   if (!response.ok) throw new Error(`Gemini API error: ${response.status}`)
 
   const data = await response.json()
@@ -62,15 +106,25 @@ async function callGemini(prompt, temperature = 0.3, maxTokens = 512) {
 }
 
 export async function lookupWithGemini(term) {
-  const systemPrompt = BASE_PROMPT + buildReferenceContext()
-  const fullPrompt = `${systemPrompt}\n\nTerm to define: "${term}"`
+  // Return from local cache first — no API call needed
+  const cached = getCachedLookup(term)
+  if (cached) return cached
 
-  const raw = await callGemini(fullPrompt, 0.3, 512)
+  // Respect the client-side cooldown after a 429
+  if (isGeminiRateLimited()) throw new GeminiRateLimitError()
+
+  const systemPrompt = BASE_PROMPT + buildReferenceContext()
+  const fullPrompt   = `${systemPrompt}\n\nTerm to define: "${term}"`
+
+  const raw     = await callGemini(fullPrompt, 0.3, 512)
   const cleaned = raw.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
-  const parsed = JSON.parse(cleaned)
+  const parsed  = JSON.parse(cleaned)
 
   if (parsed.error) return null
-  return { ...parsed, source: 'ai' }
+
+  const result = { ...parsed, source: 'ai' }
+  setCachedLookup(term, result)  // cache so same term never hits the API again
+  return result
 }
 
 /**
@@ -81,10 +135,11 @@ export async function lookupWithGemini(term) {
  */
 export async function generateWordFact(term, userSeed = '') {
   if (!GEMINI_API_KEY) return null
+  if (isGeminiRateLimited()) return null   // silently skip — don't add to user noise
 
-  const slug = term.toLowerCase().replace(/\s+/g, '_')
+  const slug     = term.toLowerCase().replace(/\s+/g, '_')
   const cacheKey = `aave_fact_${slug}`
-  const seenKey = `aave_fact_seen_${slug}`
+  const seenKey  = `aave_fact_seen_${slug}`
 
   const today = (() => {
     const d = new Date()
