@@ -44,6 +44,7 @@ export default function TermCard({ termData, source }) {
 
       {/* Body */}
       <div className="px-6 py-5 space-y-5">
+        {termData.sourceUrl?.startsWith('https://') && <a className="block text-sm text-amber-400 underline" href={termData.sourceUrl} target="_blank" rel="noreferrer">Source: {termData.sourceLabel || 'Dictionary'}</a>}
         {/* Definition */}
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Definition</p>

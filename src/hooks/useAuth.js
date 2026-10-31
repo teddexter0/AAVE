@@ -9,19 +9,26 @@ export function useAuth() {
 
   useEffect(() => {
     let unsubDoc = null
+    let generation = 0
 
-    const unsubAuth = authHelpers.onAuthStateChanged(async (firebaseUser) => {
+    const unsubAuth = authHelpers.onAuthStateChanged((firebaseUser) => {
+      const current = ++generation
+      setUser(firebaseUser || null)
+      setUserDoc(null)
+      setLoading(false)
       // Clean up previous doc subscription
       if (unsubDoc) { unsubDoc(); unsubDoc = null }
 
       if (firebaseUser) {
         setUser(firebaseUser)
         // Ensure user doc exists (handles new Google sign-in etc.)
-        try { await dbHelpers.ensureUserDoc(firebaseUser) } catch {}
+        void dbHelpers.ensureUserDoc(firebaseUser).catch(() => {})
+        if (current !== generation) return
         // Real-time listener — keeps streak/wordsLookedUp/badges always fresh
         unsubDoc = onSnapshot(
           doc(db, 'users', firebaseUser.uid),
           (snap) => {
+            if (current !== generation) return
             setUserDoc(snap.exists() ? { id: snap.id, ...snap.data() } : null)
             setLoading(false)
           },
@@ -38,6 +45,7 @@ export function useAuth() {
     })
 
     return () => {
+      generation++
       unsubAuth()
       if (unsubDoc) unsubDoc()
     }

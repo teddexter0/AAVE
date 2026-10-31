@@ -48,14 +48,14 @@ export const authHelpers = {
   onAuthStateChanged: (cb) => onAuthStateChanged(auth, cb),
 
   async signUp(email, password, displayName) {
-    const cred = await createUserWithEmailAndPassword(auth, email, password)
+    const cred = await createUserWithEmailAndPassword(auth, email.trim(), password)
     await updateProfile(cred.user, { displayName })
-    await dbHelpers.createUserDoc(cred.user)
+    // The auth observer creates the profile without blocking login.
     return cred.user
   },
 
   async signIn(email, password) {
-    const cred = await signInWithEmailAndPassword(auth, email, password)
+    const cred = await signInWithEmailAndPassword(auth, email.trim(), password)
     return cred.user
   },
 
@@ -221,7 +221,7 @@ export const dbHelpers = {
   },
 
   async saveTerm(termData) {
-    const slug = termData.term.toLowerCase().replace(/\s+/g, '_')
+    const slug = encodeURIComponent(termData.term.normalize('NFKC').trim().toLowerCase().replace(/\s+/g, '_'))
     await setDoc(doc(db, 'terms', slug), {
       ...termData,
       addedAt: serverTimestamp(),

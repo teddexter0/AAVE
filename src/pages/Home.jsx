@@ -18,8 +18,7 @@ export default function Home({ user }) {
           not just the words.
         </h1>
         <p className="text-slate-400 text-base sm:text-lg max-w-md mx-auto">
-          An AI-powered AAVE dictionary with culturally accurate definitions,
-          usage examples, and origins.
+          Search AAVE, internet slang, abbreviations, and phrases you encounter. Explore meanings, examples, and sources.
         </p>
       </motion.div>
 

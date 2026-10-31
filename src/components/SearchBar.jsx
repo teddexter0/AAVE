@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Loader2, AlertCircle, ArrowRight } from 'lucide-react'
 import { lookupTerm, sanitiseInput } from '../services/termLookup'
-import { isGeminiRateLimited } from '../services/gemini'
 import { streakService } from '../services/streakService'
 import { dbHelpers } from '../services/firebase'
 import { referenceDocuments } from '../data/referenceDocuments'
@@ -83,7 +82,7 @@ export default function SearchBar({ user, onSearch }) {
 
   const runSearch = async (raw) => {
     const term = sanitiseInput(raw)
-    if (!term) return
+    if (!term || status === 'loading') return
 
     setQuery(term)
     setShowSuggestions(false)
@@ -110,6 +109,9 @@ export default function SearchBar({ user, onSearch }) {
       setStatus('idle')
 
       if (user) {
+        void (async () => {
+        const saved = await res.savePromise
+        if (!saved) return
         await dbHelpers.addXP(user.uid, 2).catch(() => {})
         await dbHelpers.updateRecentActivity(user.uid, 'added', res.termData?.term || term).catch(() => {})
 
@@ -118,12 +120,13 @@ export default function SearchBar({ user, onSearch }) {
         for (const [badgeId, { threshold }] of Object.entries(BADGE_LOOKUP)) {
           if (count >= threshold) await dbHelpers.awardBadge(user.uid, badgeId)
         }
+        })().catch(() => {})
       }
 
       onSearch?.()
     } catch (err) {
       console.error('Search error:', err)
-      setErrorMsg('Something went wrong. Check your connection and try again.')
+      setErrorMsg(err.message || 'Lookup unavailable. Please try again.')
       setStatus('error')
     }
   }
@@ -145,7 +148,7 @@ export default function SearchBar({ user, onSearch }) {
               value={query}
               onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true) }}
               onFocus={() => setShowSuggestions(true)}
-              placeholder="Search any AAVE term…"
+              placeholder="Try ijbol, no cap, or any phrase" aria-label="Search AAVE and internet slang" disabled={status === 'loading'}
               autoComplete="off"
               spellCheck={false}
               maxLength={60}
@@ -207,12 +210,8 @@ export default function SearchBar({ user, onSearch }) {
               <div className="flex-1">
                 <p className="font-medium text-white">Term not found</p>
                 <p className="text-sm text-slate-400 mt-0.5">
-                  "{query.trim()}" isn't in the AAVE lexicon we know of.
-                  {isGeminiRateLimited() && (
-                    <span className="block mt-1 text-xs text-slate-500">
-                      AI lookup is taking a breather — local results only right now. Try again in a minute.
-                    </span>
-                  )}
+                  No dictionary entry found for "{query.trim()}" yet. Try a different spelling or check the phrase in context.
+                  
                 </p>
                 {notFoundSuggestions.length > 0 && (
                   <div className="mt-3">
