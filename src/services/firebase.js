@@ -22,7 +22,7 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signInWithRedirect,
+  signInWithPopup,
   GoogleAuthProvider,
   signOut,
   updateProfile,
@@ -65,10 +65,9 @@ export const authHelpers = {
 
   async signInWithGoogle() {
     const provider = new GoogleAuthProvider()
-    // signInWithRedirect avoids Cross-Origin-Opener-Policy errors that popup
-    // triggers on Vercel (and any host with COOP: same-origin). Firebase
-    // processes the return automatically; onAuthStateChanged fires on landing.
-    await signInWithRedirect(auth, provider)
+    provider.setCustomParameters({ prompt: 'select_account' })
+    const credential = await signInWithPopup(auth, provider)
+    return credential.user
   },
 
   async signOut() {
