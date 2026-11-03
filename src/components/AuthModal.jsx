@@ -43,14 +43,14 @@ export default function AuthModal({ onClose, onSuccess }) {
     setError('')
     setLoading(true)
     try {
-      // signInWithRedirect navigates away — onSuccess/onClose run on return
-      // via onAuthStateChanged in useAuth. Keep spinner up while redirecting.
       await authHelpers.signInWithGoogle()
+      onSuccess?.()
+      onClose()
     } catch (err) {
       setError(friendlyError(err.code))
+    } finally {
       setLoading(false)
     }
-    // intentionally no finally — page is navigating away on success
   }
 
   return (
@@ -155,7 +155,7 @@ export default function AuthModal({ onClose, onSuccess }) {
                   <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332Z"/>
                   <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58Z"/>
                 </svg>
-                {loading ? 'Redirecting to Google…' : 'Continue with Google'}
+                Continue with Google
               </button>
 
               <div className="mb-4 flex items-center gap-3">
@@ -254,6 +254,10 @@ function friendlyError(code) {
     'auth/weak-password':         'Password must be at least 6 characters.',
     'auth/invalid-email':         'Please enter a valid email.',
     'auth/popup-closed-by-user':  'Google sign-in was cancelled.',
+    'auth/popup-blocked': 'Allow pop-ups for this site, then try Google sign-in again.',
+    'auth/unauthorized-domain': 'Google sign-in is unavailable on this site address. Try the main AAVE site.',
+    'auth/operation-not-allowed': 'This sign-in method is currently disabled.',
+    'auth/account-exists-with-different-credential': 'Sign in using the method you originally used for this email.',
     'auth/network-request-failed':'Network error. Check your connection.',
     'auth/invalid-credential':    'Invalid email or password.',
     'auth/too-many-requests':     'Too many attempts. Try again later or reset your password.',
