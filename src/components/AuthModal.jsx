@@ -10,6 +10,7 @@ export default function AuthModal({ onClose, onSuccess }) {
   const [password, setPassword]       = useState('')
   const [displayName, setDisplayName] = useState('')
   const [error, setError]             = useState('')
+  const [googlePopupBlocked, setGooglePopupBlocked] = useState(false)
   const [loading, setLoading]         = useState(false)
   const [resetSent, setResetSent]     = useState(false)
 
@@ -40,6 +41,7 @@ export default function AuthModal({ onClose, onSuccess }) {
   }
 
   const handleGoogle = async () => {
+    setGooglePopupBlocked(false)
     setError('')
     setLoading(true)
     try {
@@ -47,6 +49,7 @@ export default function AuthModal({ onClose, onSuccess }) {
       onSuccess?.()
       onClose()
     } catch (err) {
+      setGooglePopupBlocked(err.code === 'auth/popup-blocked')
       setError(friendlyError(err.code))
     } finally {
       setLoading(false)
@@ -157,6 +160,16 @@ export default function AuthModal({ onClose, onSuccess }) {
                 </svg>
                 Continue with Google
               </button>
+
+              {googlePopupBlocked && (
+                <p className="mb-4 text-sm text-slate-300">
+                  In an in-app browser?{' '}
+                  <a href="https://aave-ebon.vercel.app/" target="_blank" rel="noopener noreferrer" className="text-amber-400 underline">
+                    Open AAVE in a new tab
+                  </a>
+                  {' '}or paste aave-ebon.vercel.app into Chrome or Edge and sign in there.
+                </p>
+              )}
 
               <div className="mb-4 flex items-center gap-3">
                 <div className="h-px flex-1 bg-slate-600" />
