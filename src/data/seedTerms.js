@@ -5,6 +5,12 @@
  */
 
 export const seedTerms = [
+  {"term":"w manzz","definition":"Playful approval for someone who did something helpful, loyal, or impressive. W stands for win.","example":"You saved me a seat? W manzz.","category":"expression","related":["l manzz","w mans","real one"],"source":"curated"},
+  {"term":"l manzz","definition":"Playful criticism of someone for a disappointing or embarrassing move. L stands for loss.","example":"He spoiled the ending in the group chat. L manzz.","category":"expression","related":["w manzz","l mans","take an L"],"source":"curated"},
+  {"term":"dusty","definition":"An informal insult for someone or something seen as shabby, outdated, or unimpressive. When aimed at a person, it can also imply they're cheap or undesirable.","example":"He showed up in those dusty shoes again.","category":"adjective","related":["busted","washed"],"source":"curated"},
+  {"term":"love bombing","definition":"Overwhelming someone with affection, praise, gifts, or attention, often early in a relationship, as a way to gain influence or control. Intense affection alone does not establish intent.","example":"The constant gifts and pressure to commit made her wonder if it was love bombing.","category":"noun","related":[],"source":"curated"},
+  {"term":"sent","definition":"In expressions like ‘that sent me,’ made me laugh hard or react strongly. The surrounding sentence tells you whether it means amusement, shock, or something else.","example":"The way he tried to play it cool sent me.","category":"verb","related":["ijbol","dead","crying"],"source":"curated"},
+  {"term":"folded","definition":"Gave in, backed down, or lost composure under pressure. It can also describe someone quickly dropping their resolve when tempted.","example":"He said he wasn't texting back, then folded after one message.","category":"verb","related":["caved","gave in"],"source":"curated"},
   // ─── Expressions / Affirmations ──────────────────────────────────────────
   {
     term: "no cap",
