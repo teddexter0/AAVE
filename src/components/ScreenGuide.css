@@ -1,0 +1,84 @@
+.screen-guide-trigger, .screen-guide-panel {
+  --guide-ink: #361b05;
+  --guide-light: #ffda83;
+  --guide-edge: #8c4205;
+}
+.screen-guide-trigger {
+  position: fixed;
+  z-index: 45;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  display: grid;
+  place-items: center;
+  width: clamp(3rem, 8vw, 3.75rem);
+  aspect-ratio: 1;
+  border: 2px solid var(--guide-edge);
+  border-radius: 45% 55% 48% 52%;
+  color: var(--guide-ink);
+  background: linear-gradient(140deg, white, var(--guide-light));
+  box-shadow: 0 4px 0 var(--guide-edge), 0 10px 24px #140d3550;
+  cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.screen-guide-trigger svg {
+  width: 62%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: rotate(-9deg);
+}
+@media (hover: hover) {
+  .screen-guide-trigger:hover { transform: translateY(-3px) rotate(6deg); }
+}
+.screen-guide-trigger:active { transform: translateY(2px); }
+.screen-guide-trigger:focus-visible, .screen-guide-panel button:focus-visible {
+  outline: 3px solid var(--guide-edge);
+  outline-offset: 4px;
+}
+.screen-guide-panel {
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: min(28rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: clamp(1rem, 5vw, 2rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--guide-edge);
+  border-radius: 1.25rem;
+  color: var(--guide-ink);
+  background: #fff;
+  box-shadow: 0 24px 72px #100b3466;
+}
+.screen-guide-panel[open] { animation: screen-guide-open .2s ease-out both; }
+.screen-guide-panel::backdrop { background: #101024a6; }
+.screen-guide-kicker {
+  color: var(--guide-edge);
+  font-size: .75rem;
+  font-weight: 800;
+  letter-spacing: .14em;
+}
+.screen-guide-panel h2 { margin: .35rem 0 0; font-size: 1.5rem; font-weight: 800; }
+.screen-guide-panel ol { list-style: decimal; padding-inline-start: 1.25rem; margin-block: 1rem; }
+.screen-guide-panel li { margin-block: .55rem; line-height: 1.5; overflow-wrap: anywhere; }
+.screen-guide-panel button {
+  min-height: 44px;
+  padding: .55rem 1rem;
+  border-radius: .65rem;
+  background: var(--guide-ink);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+@keyframes screen-guide-open {
+  from { opacity: 0; transform: perspective(700px) translateY(10px) rotateX(-7deg) scale(.96); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen-guide-trigger { transition: none; }
+  .screen-guide-panel[open] { animation: none; }
+}

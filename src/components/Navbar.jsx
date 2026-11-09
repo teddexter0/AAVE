@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { BookOpen, LayoutDashboard, User, LogOut, Menu, X, Medal, Users } from 'lucide-react'
 import { authHelpers } from '../services/firebase'
 import AuthModal from './AuthModal'
+import AaveScreenGuide from './AaveScreenGuide'
 
 export default function Navbar({ user }) {
   const [showAuth, setShowAuth] = useState(false)
@@ -34,7 +35,7 @@ export default function Navbar({ user }) {
           </Link>
 
           {/* Desktop nav */}
-          <div className="hidden items-center gap-1 md:flex">
+          <div className="hidden items-center gap-1 lg:flex">
             {navLinks.map(({ to, label, icon: Icon }) => (
               <Link
                 key={to}
@@ -52,7 +53,7 @@ export default function Navbar({ user }) {
           </div>
 
           {/* Auth button */}
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden lg:flex items-center gap-2">
             {user ? (
               <button
                 onClick={() => authHelpers.signOut()}
@@ -73,7 +74,10 @@ export default function Navbar({ user }) {
 
           {/* Mobile hamburger */}
           <button
-            className="md:hidden text-slate-400 hover:text-white"
+            type="button"
+            className="flex min-h-11 min-w-11 items-center justify-center text-slate-400 hover:text-white lg:hidden"
+            aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-expanded={menuOpen}
             onClick={() => setMenuOpen(!menuOpen)}
           >
             {menuOpen ? <X size={22} /> : <Menu size={22} />}
@@ -82,7 +86,7 @@ export default function Navbar({ user }) {
 
         {/* Mobile menu */}
         {menuOpen && (
-          <div className="md:hidden border-t border-slate-700/50 px-4 pb-4">
+          <div className="lg:hidden border-t border-slate-700/50 px-4 pb-4">
             <div className="flex flex-col gap-1 pt-3">
               {navLinks.map(({ to, label, icon: Icon }) => (
                 <Link
@@ -120,7 +124,7 @@ export default function Navbar({ user }) {
         )}
       </nav>
 
-      {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
+      {showAuth ? <AuthModal onClose={() => setShowAuth(false)} /> : <AaveScreenGuide />}
     </>
   )
 }
