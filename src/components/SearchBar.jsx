@@ -4,6 +4,9 @@ import { Search, Loader2, AlertCircle, ArrowRight } from 'lucide-react'
 import { lookupTerm, sanitiseInput } from '../services/termLookup'
 import { streakService } from '../services/streakService'
 import { dbHelpers } from '../services/firebase'
+import { normalizeTerm } from '../services/lookupCore'
+import { seedTerms } from '../data/seedTerms'
+import { phraseTerms } from '../data/phraseTerms'
 import { referenceDocuments } from '../data/referenceDocuments'
 import TermCard from './TermCard'
 
@@ -32,16 +35,24 @@ function editDistance(a, b) {
 }
 
 function getSuggestions(rawQuery, max = 5) {
-  const q = deElongate(rawQuery.trim().toLowerCase())
+  const q = deElongate(normalizeTerm(rawQuery))
   if (q.length < 2) return []
 
   const scored = []
-  for (const e of referenceDocuments) {
-    if (!e.word) continue
-    const c = deElongate(e.word.toLowerCase())
-    if (c.startsWith(q) || q.startsWith(c)) { scored.push({ word: e.word, score: -1 }); continue }
-    const dist = editDistance(q, c) / Math.max(q.length, c.length)
-    if (dist <= 0.5) scored.push({ word: e.word, score: dist })
+  const entries = [
+    ...referenceDocuments,
+    ...seedTerms.map(entry => ({ word: entry.term, aliases: entry.aliases })),
+    ...phraseTerms.map(entry => ({ word: entry.term, aliases: entry.aliases })),
+  ]
+  for (const entry of entries) {
+    if (!entry.word) continue
+    const scores = [entry.word, ...(entry.aliases || [])].map(word => {
+      const candidate = deElongate(normalizeTerm(word))
+      if (candidate.startsWith(q) || q.startsWith(candidate)) return -1
+      return editDistance(q, candidate) / Math.max(q.length, candidate.length)
+    })
+    const score = Math.min(...scores)
+    if (score <= 0.5) scored.push({ word: entry.word, score })
   }
 
   scored.sort((a, b) => a.score - b.score)
@@ -168,7 +179,7 @@ export default function SearchBar({ user, onSearch }) {
                     <li key={word}>
                       <button
                         type="button"
-                        onMouseDown={(e) => { e.preventDefault(); runSearch(word) }}
+                        onClick={() => runSearch(word)}
                         className="w-full px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-amber-500/10 hover:text-amber-400 transition-colors capitalize"
                       >
                         {word}

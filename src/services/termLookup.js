@@ -60,5 +60,10 @@ export async function lookupTerm(rawTerm, uid = null) {
     await dbHelpers.addToWordBank(uid, id, termData.term)
     return true
   })().catch(() => false) : null
-  return { termData, source: termData.source || 'db', termId: slug, correctedFrom: null, savePromise }
+  return {
+    termData, source: termData.source || 'db',
+    termId: encodeURIComponent(normalizeTerm(termData.term).replace(/\s+/g, '_')),
+    correctedFrom: normalizeTerm(termData.term) === term ? null : clean,
+    savePromise,
+  }
 }

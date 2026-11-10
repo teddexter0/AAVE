@@ -43,7 +43,8 @@ test('proxy validates input and keeps requests on the dictionary host', async ()
     await handler({ method: 'GET', query: { term: ['bad'] } }, res)
     assert.equal(res.code, 400)
     await handler({ method: 'GET', query: { term: 'https://example.com/private' } }, res)
-    assert.equal(res.code, 404)
+    assert.equal(res.code, 200)
+    assert.equal(res.data.found, false)
     global.fetch = async () => ({ ok: true, json: async () => ({ entries: [
       { language: { code: 'en' }, senses: [{ definition: 'Standard meaning' }] },
       { language: { code: 'en' }, senses: [
@@ -57,5 +58,60 @@ test('proxy validates input and keeps requests on the dictionary host', async ()
     global.fetch = async () => { throw new Error('offline') }
     await handler({ method: 'GET', query: { term: 'missing' } }, res)
     assert.equal(res.code, 502)
+  } finally { global.fetch = original }
+})
+
+test('phrase variants match the same sourced entry, including punctuation and curly apostrophes', () => {
+  for (const input of ["I'm tapped in", 'I’m tapped in!', 'im tapped in', 'tapped-in', '“I am tapped in.”']) {
+    assert.equal(bundledTerm(input)?.term, "I'm tapped in", input)
+  }
+  for (const input of ['hit the pentagon', 'They hit the Pentagon!', 'they hit the fucking pentagon']) {
+    assert.equal(bundledTerm(input)?.term, 'they hit the Pentagon', input)
+  }
+  assert.equal(bundledTerm('pentagon'), null)
+})
+
+test('dictionary recognizes usage labels and nested slang senses without leaking ordinary meanings', () => {
+  const data = { entries: [{ language: { code: 'en' }, senses: [
+    { definition: 'Standard meaning', subsenses: [
+      { definition: 'A formal subsense' },
+      { definition: '(Internet slang, humorous) A meme reaction', tags: ['Internet', 'humorous'] },
+    ] },
+  ] }] }
+  const entry = parseDictionary(data, 'new meme')
+  assert.match(entry.definition, /A meme reaction/)
+  assert.match(entry.category, /slang/)
+  assert.equal(parseDictionary({ entries: [{ language: { code: 'en' }, senses: [
+    { definition: '(non-slang) A standard meaning' },
+  ] }] }, 'standard'), null)
+})
+
+test('API serves curated phrases without depending on an upstream dictionary', async () => {
+  const original = global.fetch
+  const res = { setHeader() {}, status(code) { this.code = code; return this }, json(data) { this.data = data; return this } }
+  try {
+    global.fetch = () => assert.fail('unnecessary upstream lookup')
+    for (const term of ['hit the pentagon', 'I’m tapped in!']) {
+      await handler({ method: 'GET', query: { term } }, res)
+      assert.equal(res.code, 200)
+      assert.equal(res.data.found, true)
+      assert.equal(res.data.termData.source, 'curated')
+      assert.match(res.data.termData.sourceUrl, /^https:/)
+    }
+    await handler({ method: 'GET', query: { term: '!!!' } }, res)
+    assert.equal(res.code, 400)
+  } finally { global.fetch = original }
+})
+
+test('an upstream no-match returns an explicit empty result instead of an HTTP failure', async () => {
+  const original = global.fetch
+  const headers = {}
+  const res = { setHeader(name, value) { headers[name] = value }, status(code) { this.code = code; return this }, json(data) { this.data = data; return this } }
+  try {
+    global.fetch = async () => ({ status: 404 })
+    await handler({ method: 'GET', query: { term: 'unlisted phrase' } }, res)
+    assert.equal(res.code, 200)
+    assert.deepEqual(res.data, { found: false, entries: [] })
+    assert.equal(headers['Cache-Control'], 'no-store')
   } finally { global.fetch = original }
 })

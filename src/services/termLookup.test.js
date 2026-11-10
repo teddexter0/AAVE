@@ -45,3 +45,24 @@ test('dictionary outage remains an error rather than a false not-found result', 
   const lookup = await loadLookup({ dictionary: async () => { throw new Error('Provider unavailable') } })
   await assert.rejects(lookup('unlisted'), /unavailable/)
 })
+
+test('phrase aliases use a single canonical word-bank ID and never require a network lookup', async () => {
+  const saved = []
+  const bank = []
+  const lookup = await loadLookup({
+    dictionary: () => assert.fail('unnecessary network'),
+    db: {
+      getTermBySlug: () => assert.fail('unnecessary database read'),
+      saveTerm: async entry => { saved.push(entry); return 'canonical' },
+      addToWordBank: async (...args) => { bank.push(args) },
+    },
+  })
+  const result = await lookup('hit the pentagon', 'user')
+  assert.equal(result.termData.term, 'they hit the Pentagon')
+  assert.equal(result.correctedFrom, 'hit the pentagon')
+  assert.equal(result.termId, 'they_hit_the_pentagon')
+  assert.equal(await result.savePromise, true)
+  assert.equal(saved[0].term, 'they hit the Pentagon')
+  assert.deepEqual(bank[0], ['user', 'canonical', 'they hit the Pentagon'])
+  assert.equal((await lookup('I’m tapped in!')).termData.term, "I'm tapped in")
+})
