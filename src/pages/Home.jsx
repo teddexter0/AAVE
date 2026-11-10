@@ -18,7 +18,7 @@ export default function Home({ user }) {
           not just the words.
         </h1>
         <p className="text-slate-400 text-base sm:text-lg max-w-md mx-auto">
-          Search AAVE, internet slang, abbreviations, and phrases you encounter. Explore meanings, examples, and sources.
+          Look up AAVE expressions, trending internet slang, and old-school slang. See what they mean and how they’re used.
         </p>
       </motion.div>
 

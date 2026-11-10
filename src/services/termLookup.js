@@ -1,5 +1,5 @@
 import { dbHelpers } from './firebase'
-import { bundledTerm, lookupDictionary, normalizeTerm, withTimeout } from './lookupCore'
+import { bundledTerm, hasSlangTag, lookupDictionary, normalizeTerm, withTimeout } from './lookupCore'
 import { seedTerms } from '../data/seedTerms'
 import { referenceDocuments } from '../data/referenceDocuments'
 
@@ -31,7 +31,7 @@ export function sanitiseInput(raw) {
 
 // ── Main export ──────────────────────────────────────────────────────────────
 
-/** Exact local entry, bounded database lookup, then live dictionary lookup. */
+/** Look up curated expressions or dictionary senses explicitly tagged as slang. */
 export async function lookupTerm(rawTerm, uid = null) {
   const clean = sanitiseInput(rawTerm)
   const term = normalizeTerm(clean)
@@ -43,7 +43,15 @@ export async function lookupTerm(rawTerm, uid = null) {
   if (!termData && local) termData = { ...buildResult(local), source: 'curated' }
   let stored = false
   if (!termData) {
-    try { termData = await withTimeout(dbHelpers.getTermBySlug(slug), 1800); stored = Boolean(termData) } catch {}
+    try {
+      const cached = await withTimeout(dbHelpers.getTermBySlug(slug), 1800)
+      if (cached?.source === 'dictionary' && hasSlangTag((cached.category || '').split(','))) {
+        termData = cached
+        stored = true
+      }
+    } catch {
+      // The live lookup is still available if Firestore is unreachable.
+    }
   }
   if (!termData) termData = await lookupDictionary(term)
   if (!termData) return null

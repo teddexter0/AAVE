@@ -18,14 +18,24 @@ export function bundledTerm(term, entries = []) {
   return entries.find(entry => normalizeTerm(entry.term) === normalizeTerm(term)) || null
 }
 
+export function hasSlangTag(tags) {
+  return tags.some(tag => /^(?!non[- ])(?:[a-z0-9]+[ -])*slang$/i.test(tag.trim()))
+}
+
+export function filterSlangEntries(entries = []) {
+  return entries.filter(entry => entry.language?.code === 'en').flatMap(entry => {
+    const senses = (entry.senses || []).filter(sense =>
+      typeof sense.definition === 'string' && hasSlangTag(sense.tags || [])
+    ).map(({ definition, tags, examples }) => ({ definition, tags, examples }))
+    return senses.length ? [{ ...entry, senses }] : []
+  })
+}
+
 export function parseDictionary(data, term) {
-  const entries = (data.entries || []).filter(entry => entry.language?.code === 'en')
-  const senses = entries.flatMap(entry => (entry.senses || []).filter(s => typeof s.definition === 'string').map(s => ({ ...s, partOfSpeech: entry.partOfSpeech })))
-  senses.sort((a, b) => Number((b.tags || []).some(t => /slang|informal|internet/i.test(t))) - Number((a.tags || []).some(t => /slang|informal|internet/i.test(t))))
-  const sense = senses[0]
+  const sense = filterSlangEntries(data.entries)[0]?.senses[0]
   if (!sense) return null
   return { term, definition: sense.definition, example: sense.examples?.[0] || '',
-    category: (sense.tags || []).join(', ') || sense.partOfSpeech || 'expression',
+    category: sense.tags.join(', '),
     origin: '', related: [], source: 'dictionary', sourceLabel: 'Wiktionary via FreeDictionaryAPI (CC BY-SA 4.0)',
     sourceUrl: `https://en.wiktionary.org/wiki/${encodeURIComponent(term.replace(/ /g, '_'))}#English` }
 }

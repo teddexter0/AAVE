@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import ScreenGuide from './ScreenGuide';
 
 const guides = {
-  '/': ['Look up an expression', ['Type a word, abbreviation or phrase, like IJBOL, and submit your search.', 'Read the meaning and examples in context. Check the source when a result provides one.', 'Sign in to save a term to My Words.']],
+  '/': ['Look up an expression', ['Type a slang term or AAVE expression, like IJBOL or no cap, and submit your search.', 'Read the meaning and examples in context. Check the source when a result provides one.', 'Sign in to save a term to My Words.']],
   '/dashboard': ['Pick up where you left off', ['Use your dashboard to see your vocabulary activity.', 'Open My Words to revisit saved terms or return to Search to add something new.']],
   '/word-bank': ['Use My Words', ['Revisit the terms you saved while searching.', 'Return to Search to look up and save another expression.']],
   '/leaderboard': ['Read the leaderboard', ['Use this page to see how learners rank.', 'Return to Search to explore more terms.']],

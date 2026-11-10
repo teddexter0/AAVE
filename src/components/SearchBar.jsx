@@ -148,7 +148,7 @@ export default function SearchBar({ user, onSearch }) {
               value={query}
               onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true) }}
               onFocus={() => setShowSuggestions(true)}
-              placeholder="Try ijbol, no cap, or any phrase" aria-label="Search AAVE and internet slang" disabled={status === 'loading'}
+              placeholder="Try IJBOL, no cap, or ride or die" aria-label="Search AAVE expressions and slang" disabled={status === 'loading'}
               autoComplete="off"
               spellCheck={false}
               maxLength={60}
@@ -210,7 +210,7 @@ export default function SearchBar({ user, onSearch }) {
               <div className="flex-1">
                 <p className="font-medium text-white">Term not found</p>
                 <p className="text-sm text-slate-400 mt-0.5">
-                  No dictionary entry found for "{query.trim()}" yet. Try a different spelling or check the phrase in context.
+                  No slang entry found for "{query.trim()}". Try a different spelling or another slang term.
                   
                 </p>
                 {notFoundSuggestions.length > 0 && (
