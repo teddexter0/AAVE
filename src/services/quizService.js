@@ -31,17 +31,17 @@ export async function generateQuiz(uid) {
 
   // Fetch full term data for each quiz term
   const termDataList = await Promise.all(
-    quizTerms.map((entry) => dbHelpers.getTermBySlug(entry.id))
+    quizTerms.map(async entry => entry.termData?.definition
+      ? { ...entry.termData, id: entry.id }
+      : dbHelpers.getTermBySlug(entry.id))
   )
 
   // Build distractor pool from the rest of the word bank
-  const distractorSlugs = sorted
-    .slice(3)
-    .map((e) => e.id)
-    .slice(0, 9)
-
+  const distractorEntries = sorted.slice(3, 12)
   const distractorData = await Promise.all(
-    distractorSlugs.map((slug) => dbHelpers.getTermBySlug(slug))
+    distractorEntries.map(async entry => entry.termData?.definition
+      ? { ...entry.termData, id: entry.id }
+      : dbHelpers.getTermBySlug(entry.id))
   )
   const distractors = distractorData.filter(Boolean)
 

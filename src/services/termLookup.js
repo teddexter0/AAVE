@@ -1,5 +1,5 @@
 import { dbHelpers } from './firebase'
-import { bundledTerm, hasSlangTag, lookupDictionary, normalizeTerm, withTimeout } from './lookupCore'
+import { bundledTerm, hasConversationalTag, lookupDictionary, normalizeTerm, termSlug, withTimeout } from './lookupCore'
 import { seedTerms } from '../data/seedTerms'
 import { referenceDocuments } from '../data/referenceDocuments'
 
@@ -36,18 +36,16 @@ export async function lookupTerm(rawTerm, uid = null) {
   const clean = sanitiseInput(rawTerm)
   const term = normalizeTerm(clean)
   if (!term) return null
-  const slug = encodeURIComponent(term.replace(/\s+/g, '_'))
+  const slug = termSlug(term)
   // Exact typed terms always win. Fuzzy matches remain optional UI suggestions.
   let termData = bundledTerm(term, seedTerms)
   const local = referenceDocuments.find(e => e.word && normalizeTerm(e.word) === term)
   if (!termData && local) termData = { ...buildResult(local), source: 'curated' }
-  let stored = false
   if (!termData) {
     try {
       const cached = await withTimeout(dbHelpers.getTermBySlug(slug), 1800)
-      if (cached?.source === 'dictionary' && hasSlangTag((cached.category || '').split(','))) {
+      if (cached?.source === 'dictionary' && hasConversationalTag((cached.category || '').split(','), term)) {
         termData = cached
-        stored = true
       }
     } catch {
       // The live lookup is still available if Firestore is unreachable.
@@ -55,14 +53,13 @@ export async function lookupTerm(rawTerm, uid = null) {
   }
   if (!termData) termData = await lookupDictionary(term)
   if (!termData) return null
-  const savePromise = uid ? (async () => {
-    const id = stored ? slug : await dbHelpers.saveTerm(termData)
-    await dbHelpers.addToWordBank(uid, id, termData.term)
-    return true
-  })().catch(() => false) : null
+  const canonicalId = termSlug(termData.term)
+  const savePromise = uid
+    ? dbHelpers.addToWordBank(uid, canonicalId, termData.term, termData).then(() => true).catch(() => false)
+    : null
   return {
     termData, source: termData.source || 'db',
-    termId: encodeURIComponent(normalizeTerm(termData.term).replace(/\s+/g, '_')),
+    termId: canonicalId,
     correctedFrom: normalizeTerm(termData.term) === term ? null : clean,
     savePromise,
   }

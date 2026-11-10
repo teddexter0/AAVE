@@ -1,6 +1,18 @@
 // Source-backed phrases and explicit variants used by both search and the API.
 export const phraseTerms = [
   {
+    term: 'knee-jerk reaction',
+    aliases: ['knee-jerk', 'knee jerk', 'knee-jerking', 'knee jerking', 'knee jerk reaction', 'knee-jerk reactions', 'knee jerk reactions'],
+    definition: 'An immediate, automatic response made before thinking the situation through. It often describes reacting impulsively or out of habit.',
+    example: 'Deleting the app after one bad comment was a knee-jerk reaction.',
+    origin: 'A figurative expression based on an automatic physical reflex. Used in everyday conversation.',
+    related: ['overreacting', 'jumping to conclusions'],
+    category: 'conversational idiom',
+    source: 'curated',
+    sourceUrl: 'https://dictionary.cambridge.org/dictionary/english/knee-jerk',
+    sourceLabel: 'Cambridge Dictionary',
+  },
+  {
     term: "I'm tapped in",
     aliases: ['im tapped in', 'i am tapped in', 'tapped in', 'tapped-in', "i'm tapped-in"],
     definition: "I'm connected and up to date with a scene, community, or topic. Depending on context, it can mean I know the right people or know what's going on.",

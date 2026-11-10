@@ -1,12 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { bundledTerm, hasSlangTag, normalizeTerm, withTimeout } from './lookupCore.js'
+import { bundledTerm, hasConversationalTag, normalizeTerm, termSlug, withTimeout } from './lookupCore.js'
 
 async function loadLookup({ dictionary, db = {}, entries = [] } = {}) {
   const source = (await readFile(new URL('./termLookup.js', import.meta.url), 'utf8')).replace(/^import .*$/gm, '')
-  const factory = new Function('dbHelpers', 'bundledTerm', 'hasSlangTag', 'lookupDictionary', 'normalizeTerm', 'withTimeout', 'seedTerms', 'referenceDocuments', source.replace(/export /g, '') + '\nreturn lookupTerm')
-  return factory({ getTermBySlug: async () => null, ...db }, bundledTerm, hasSlangTag, dictionary || (async () => null), normalizeTerm, withTimeout, [], entries)
+  const factory = new Function('dbHelpers', 'bundledTerm', 'hasConversationalTag', 'lookupDictionary', 'normalizeTerm', 'termSlug', 'withTimeout', 'seedTerms', 'referenceDocuments', source.replace(/export /g, '') + '\nreturn lookupTerm')
+  return factory({ getTermBySlug: async () => null, ...db }, bundledTerm, hasConversationalTag, dictionary || (async () => null), normalizeTerm, termSlug, withTimeout, [], entries)
 }
 
 test('an exact typed acronym is returned without AI or database access', async () => {
@@ -35,7 +35,7 @@ test('an older explicitly tagged slang sense can still be used from Firestore', 
 })
 
 test('failed word-bank storage does not turn a definition into a search failure', async () => {
-  const lookup = await loadLookup({ db: { saveTerm: async () => { throw new Error('offline') } } })
+  const lookup = await loadLookup({ db: { addToWordBank: async () => { throw new Error('offline') } } })
   const result = await lookup('ijbol', 'test-user')
   assert.equal(result.termData.term, 'ijbol')
   assert.equal(await result.savePromise, false)
@@ -46,14 +46,13 @@ test('dictionary outage remains an error rather than a false not-found result', 
   await assert.rejects(lookup('unlisted'), /unavailable/)
 })
 
-test('phrase aliases use a single canonical word-bank ID and never require a network lookup', async () => {
-  const saved = []
+test('phrase aliases save the private definition using one canonical word-bank ID', async () => {
   const bank = []
   const lookup = await loadLookup({
     dictionary: () => assert.fail('unnecessary network'),
     db: {
       getTermBySlug: () => assert.fail('unnecessary database read'),
-      saveTerm: async entry => { saved.push(entry); return 'canonical' },
+      saveTerm: () => assert.fail('saving must not depend on the public dictionary'),
       addToWordBank: async (...args) => { bank.push(args) },
     },
   })
@@ -62,7 +61,6 @@ test('phrase aliases use a single canonical word-bank ID and never require a net
   assert.equal(result.correctedFrom, 'hit the pentagon')
   assert.equal(result.termId, 'they_hit_the_pentagon')
   assert.equal(await result.savePromise, true)
-  assert.equal(saved[0].term, 'they hit the Pentagon')
-  assert.deepEqual(bank[0], ['user', 'canonical', 'they hit the Pentagon'])
+  assert.deepEqual(bank[0], ['user', 'they_hit_the_pentagon', 'they hit the Pentagon', result.termData])
   assert.equal((await lookup('I’m tapped in!')).termData.term, "I'm tapped in")
 })

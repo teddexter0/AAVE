@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Star, Loader2, BookmarkPlus, Check, Zap, CheckCircle, XCircle, Lightbulb } from 'lucide-react'
+import { Star, Loader2, Zap, CheckCircle, XCircle, Lightbulb } from 'lucide-react'
 import { dbHelpers } from '../services/firebase'
 import { generateWordFact } from '../services/gemini'
 import { referenceDocuments } from '../data/referenceDocuments'
 import TermCard from './TermCard'
+import SaveTermButton from './SaveTermButton'
 
 const MS_PER_DAY = 86400000
 
@@ -104,8 +105,6 @@ function getUserSeed(user) {
 export default function WordOfTheDay({ user }) {
   const [term, setTerm] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [saved, setSaved] = useState(false)
-  const [saving, setSaving] = useState(false)
   const [fact, setFact] = useState(null)
   const [factLoading, setFactLoading] = useState(false)
 
@@ -153,22 +152,6 @@ export default function WordOfTheDay({ user }) {
       .finally(() => setFactLoading(false))
   }, [term?.term])
 
-  const handleSave = async () => {
-    if (!user || !term || saving || saved) return
-    setSaving(true)
-    try {
-      const slug = term.term.toLowerCase().replace(/\s+/g, '_')
-      const existing = await dbHelpers.getTermBySlug(slug)
-      if (!existing) await dbHelpers.saveTerm(term)
-      await dbHelpers.addToWordBank(user.uid, slug, term.term)
-      setSaved(true)
-    } catch (err) {
-      console.error('Failed to save to word bank:', err)
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const startChallenge = () => {
     if (!term) return
     setChallengeOptions(buildChallengeOptions(term.definition, term.term))
@@ -209,25 +192,11 @@ export default function WordOfTheDay({ user }) {
             Word of the Day
           </span>
         </div>
-        {user && (
-          <button
-            onClick={handleSave}
-            disabled={saving || saved}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60
-              bg-slate-700/60 border border-slate-600/50 text-slate-300 hover:border-amber-500/40 hover:text-amber-400"
-          >
-            {saved ? (
-              <><Check size={12} className="text-green-400" /> Saved</>
-            ) : saving ? (
-              <><Loader2 size={12} className="animate-spin" /> Saving…</>
-            ) : (
-              <><BookmarkPlus size={12} /> Save to Word Bank</>
-            )}
-          </button>
-        )}
+
       </div>
 
       <TermCard termData={term} source="db" />
+      {user && <SaveTermButton key={`${user.uid}:${term.term}`} user={user} termData={term} />}
 
       {/* AI Fun Fact */}
       {(factLoading || fact) && (

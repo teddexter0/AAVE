@@ -3,18 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Loader2, AlertCircle, ArrowRight } from 'lucide-react'
 import { lookupTerm, sanitiseInput } from '../services/termLookup'
 import { streakService } from '../services/streakService'
-import { dbHelpers } from '../services/firebase'
-import { normalizeTerm } from '../services/lookupCore'
+import { normalizeSearchKey } from '../services/lookupCore'
 import { seedTerms } from '../data/seedTerms'
 import { phraseTerms } from '../data/phraseTerms'
 import { referenceDocuments } from '../data/referenceDocuments'
 import TermCard from './TermCard'
-
-const BADGE_LOOKUP = {
-  first_look:      { threshold: 1  },
-  word_collector:  { threshold: 10 },
-  culture_scholar: { threshold: 50 },
-}
+import SaveTermButton from './SaveTermButton'
 
 // ── Fuzzy typeahead (same de-elongation used in termLookup) ──────────────────
 
@@ -35,7 +29,7 @@ function editDistance(a, b) {
 }
 
 function getSuggestions(rawQuery, max = 5) {
-  const q = deElongate(normalizeTerm(rawQuery))
+  const q = deElongate(normalizeSearchKey(rawQuery))
   if (q.length < 2) return []
 
   const scored = []
@@ -47,12 +41,15 @@ function getSuggestions(rawQuery, max = 5) {
   for (const entry of entries) {
     if (!entry.word) continue
     const scores = [entry.word, ...(entry.aliases || [])].map(word => {
-      const candidate = deElongate(normalizeTerm(word))
-      if (candidate.startsWith(q) || q.startsWith(candidate)) return -1
-      return editDistance(q, candidate) / Math.max(q.length, candidate.length)
+      const candidate = deElongate(normalizeSearchKey(word))
+      if (candidate.startsWith(q)) return -1
+      const distance = editDistance(q, candidate)
+      const limit = Math.min(2, Math.floor(Math.max(q.length, candidate.length) * 0.3))
+      if (distance > limit || (q[0] !== candidate[0] && distance > 1)) return Infinity
+      return distance / Math.max(q.length, candidate.length)
     })
     const score = Math.min(...scores)
-    if (score <= 0.5) scored.push({ word: entry.word, score })
+    if (score <= 0.3) scored.push({ word: entry.word, score })
   }
 
   scored.sort((a, b) => a.score - b.score)
@@ -108,7 +105,7 @@ export default function SearchBar({ user, onSearch }) {
     if (user) streakService.recordActivity(user.uid).catch(() => {})
 
     try {
-      const res = await lookupTerm(term, user?.uid ?? null)
+      const res = await lookupTerm(term)
 
       if (!res) {
         setStatus('not_found')
@@ -118,21 +115,6 @@ export default function SearchBar({ user, onSearch }) {
       setResult(res)
       setCorrectedFrom(res.correctedFrom || null)
       setStatus('idle')
-
-      if (user) {
-        void (async () => {
-        const saved = await res.savePromise
-        if (!saved) return
-        await dbHelpers.addXP(user.uid, 2).catch(() => {})
-        await dbHelpers.updateRecentActivity(user.uid, 'added', res.termData?.term || term).catch(() => {})
-
-        const userDoc = await dbHelpers.getUserDoc(user.uid)
-        const count = userDoc?.wordsLookedUp || 0
-        for (const [badgeId, { threshold }] of Object.entries(BADGE_LOOKUP)) {
-          if (count >= threshold) await dbHelpers.awardBadge(user.uid, badgeId)
-        }
-        })().catch(() => {})
-      }
 
       onSearch?.()
     } catch (err) {
@@ -152,7 +134,7 @@ export default function SearchBar({ user, onSearch }) {
       <form onSubmit={handleSubmit}>
         <div className="flex gap-2">
           <div className="relative flex-1">
-            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <Search aria-hidden="true" size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input
               ref={inputRef}
               type="text"
@@ -198,7 +180,7 @@ export default function SearchBar({ user, onSearch }) {
           >
             {status === 'loading'
               ? <Loader2 size={18} className="animate-spin" />
-              : <Search size={18} />}
+              : <Search aria-hidden="true" size={18} />}
             <span className="hidden sm:inline">{status === 'loading' ? 'Searching…' : 'Search'}</span>
           </button>
         </div>
@@ -217,11 +199,11 @@ export default function SearchBar({ user, onSearch }) {
           <motion.div key="not_found" className="mt-6 rounded-xl border border-slate-700/50 bg-[#1E293B] p-5"
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
             <div className="flex items-start gap-3">
-              <AlertCircle size={20} className="shrink-0 text-amber-400 mt-0.5" />
+              <AlertCircle aria-hidden="true" size={20} className="shrink-0 text-amber-400 mt-0.5" />
               <div className="flex-1">
                 <p className="font-medium text-white">Term not found</p>
                 <p className="text-sm text-slate-400 mt-0.5">
-                  No slang entry found for "{query.trim()}". Try a different spelling or another slang term.
+                  No slang or conversational expression found for "{query.trim()}" yet. Try a different spelling or the base phrase.
                   
                 </p>
                 {notFoundSuggestions.length > 0 && (
@@ -234,7 +216,7 @@ export default function SearchBar({ user, onSearch }) {
                           onClick={() => runSearch(w)}
                           className="flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/5 px-3 py-1 text-xs text-amber-400 hover:bg-amber-500/10 transition-colors capitalize"
                         >
-                          {w} <ArrowRight size={10} />
+                          {w} <ArrowRight aria-hidden="true" size={10} />
                         </button>
                       ))}
                     </div>
@@ -250,7 +232,7 @@ export default function SearchBar({ user, onSearch }) {
             className="mt-6 rounded-xl border border-red-500/20 bg-red-500/10 p-5"
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
             <div className="flex items-start gap-3">
-              <AlertCircle size={20} className="shrink-0 text-red-400 mt-0.5" />
+              <AlertCircle aria-hidden="true" size={20} className="shrink-0 text-red-400 mt-0.5" />
               <div className="flex-1">
                 <p className="text-sm text-red-300">{errorMsg}</p>
                 {suggestions.length > 0 && (
@@ -261,7 +243,7 @@ export default function SearchBar({ user, onSearch }) {
                         onClick={() => runSearch(w)}
                         className="flex items-center gap-1 rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:text-white transition-colors capitalize"
                       >
-                        {w} <ArrowRight size={10} />
+                        {w} <ArrowRight aria-hidden="true" size={10} />
                       </button>
                     ))}
                   </div>
@@ -277,17 +259,18 @@ export default function SearchBar({ user, onSearch }) {
             {/* Auto-correction banner */}
             {correctedFrom && (
               <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
-                <ArrowRight size={12} />
+                <ArrowRight aria-hidden="true" size={12} />
                 Showing results for <span className="font-semibold capitalize mx-1">"{result.termData.term}"</span>
                 — searched for "{correctedFrom}"
               </div>
             )}
             <TermCard termData={result.termData} source={result.source} />
-            {!user && (
-              <p className="mt-3 text-center text-sm text-slate-400">
-                Sign in to save this term to your word bank and track your streak.
-              </p>
-            )}
+            <SaveTermButton
+              key={`${user?.uid || 'guest'}:${result.termId}`}
+              user={user}
+              termData={result.termData}
+              autoSave
+            />
           </motion.div>
         )}
       </AnimatePresence>

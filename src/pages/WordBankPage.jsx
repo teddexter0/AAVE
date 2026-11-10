@@ -6,7 +6,7 @@ import QuizMode from '../components/QuizMode'
 import { useWordBank } from '../hooks/useWordBank'
 
 export default function WordBankPage({ user }) {
-  const { wordBank, loading, reload } = useWordBank(user)
+  const { wordBank, loading, error, reload } = useWordBank(user)
   const [showQuiz, setShowQuiz] = useState(false)
 
   if (!user) {
@@ -58,11 +58,14 @@ export default function WordBankPage({ user }) {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
             >
-              <WordBank
-                words={wordBank}
-                loading={loading}
-                onQuizMe={() => setShowQuiz(true)}
-              />
+              {error ? (
+                <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+                  <p>{error}</p>
+                  <button type="button" onClick={reload} className="mt-3 min-h-11 rounded-lg border border-red-400/40 px-4 py-2 font-semibold">Retry loading My Words</button>
+                </div>
+              ) : (
+                <WordBank words={wordBank} loading={loading} onQuizMe={() => setShowQuiz(true)} />
+              )}
             </motion.div>
           )}
         </AnimatePresence>

@@ -115,3 +115,21 @@ test('an upstream no-match returns an explicit empty result instead of an HTTP f
     assert.equal(headers['Cache-Control'], 'no-store')
   } finally { global.fetch = original }
 })
+
+test('hyphenated and inflected conversational aliases keep an accurate idiom label', () => {
+  for (const term of ['knee-jerking', 'knee jerking', 'KNEE–JERKING!', 'knee jerk reactions']) {
+    const entry = bundledTerm(term)
+    assert.equal(entry?.term, 'knee-jerk reaction', term)
+    assert.equal(entry.category, 'conversational idiom')
+    assert.match(entry.sourceUrl, /dictionary.cambridge.org/)
+  }
+})
+
+test('multiword conversational senses are eligible while ordinary dictionary senses stay excluded', () => {
+  const data = { entries: [{ language: { code: 'en' }, senses: [
+    { definition: 'A formal definition' },
+    { definition: '(idiomatic) A conversational expression', tags: ['idiomatic'] },
+  ] }] }
+  assert.match(parseDictionary(data, 'new expression').definition, /conversational/)
+  assert.equal(parseDictionary(data, 'formalword'), null)
+})

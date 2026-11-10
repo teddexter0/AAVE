@@ -1,6 +1,8 @@
+import { termSlug } from './lookupCore'
 import { initializeApp } from 'firebase/app'
 import {
   getFirestore,
+  onSnapshot,
   doc,
   getDoc,
   setDoc,
@@ -77,45 +79,53 @@ export const authHelpers = {
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
+function userDefaults(user) {
+  const displayName = user?.displayName || ''
+  return {
+    displayName,
+    displayNameLower: displayName.toLowerCase(),
+    email: user?.email || '',
+    username: null,
+    usernameChangedAt: null,
+    streak: 0,
+    lastActiveDate: '',
+    wordsLookedUp: 0,
+    xp: 0,
+    badges: [],
+    friends: [],
+    recentActivity: [],
+    joinedAt: serverTimestamp(),
+  }
+}
+
 export const dbHelpers = {
   // User document
   async createUserDoc(user) {
-    const displayName = user.displayName || ''
-    await setDoc(doc(db, 'users', user.uid), {
-      displayName,
-      displayNameLower: displayName.toLowerCase(),
-      email: user.email || '',
-      username: null,             // set separately via setUsername()
-      usernameChangedAt: null,    // tracks 30-day change quota
-      streak: 0,
-      lastActiveDate: '',
-      wordsLookedUp: 0,
-      xp: 0,
-      badges: [],
-      friends: [],
-      recentActivity: [],
-      joinedAt: serverTimestamp(),
+    const ref = doc(db, 'users', user.uid)
+    await runTransaction(db, async transaction => {
+      const snap = await transaction.get(ref)
+      if (!snap.exists()) transaction.set(ref, userDefaults(user))
     })
   },
 
   async ensureUserDoc(user) {
     const ref = doc(db, 'users', user.uid)
-    const snap = await getDoc(ref)
-    if (!snap.exists()) {
-      await this.createUserDoc(user)
-      const fresh = await getDoc(ref)
-      return fresh.data()
-    }
-    const data = snap.data()
-    const patches = {}
-    if (data.displayNameLower === undefined) patches.displayNameLower = (data.displayName || '').toLowerCase()
-    if (data.friends === undefined) patches.friends = []
-    if (data.recentActivity === undefined) patches.recentActivity = []
-    if (data.xp === undefined) patches.xp = 0
-    if (data.username === undefined) patches.username = null
-    if (data.usernameChangedAt === undefined) patches.usernameChangedAt = null
-    if (Object.keys(patches).length) await updateDoc(ref, patches)
-    return { ...data, ...patches }
+    return runTransaction(db, async transaction => {
+      const snap = await transaction.get(ref)
+      const defaults = userDefaults(user)
+      if (!snap.exists()) {
+        transaction.set(ref, defaults)
+        return defaults
+      }
+      const data = snap.data()
+      const patches = {}
+      defaults.displayNameLower = (data.displayName || user.displayName || '').toLowerCase()
+      for (const [field, value] of Object.entries(defaults)) {
+        if (data[field] === undefined) patches[field] = value
+      }
+      if (Object.keys(patches).length) transaction.update(ref, patches)
+      return { ...data, ...patches }
+    })
   },
 
   // ─── Username ────────────────────────────────────────────────────────────
@@ -220,7 +230,7 @@ export const dbHelpers = {
   },
 
   async saveTerm(termData) {
-    const slug = encodeURIComponent(termData.term.normalize('NFKC').trim().toLowerCase().replace(/\s+/g, '_'))
+    const slug = termSlug(termData.term)
     await setDoc(doc(db, 'terms', slug), {
       ...termData,
       addedAt: serverTimestamp(),
@@ -230,19 +240,69 @@ export const dbHelpers = {
   },
 
   // Word bank
-  async addToWordBank(uid, termId, term) {
+  async addToWordBank(uid, termId, term, termData = null) {
+    const currentUser = auth.currentUser
+    if (!uid || currentUser?.uid !== uid) throw new Error('Sign in to save to My Words.')
     const ref = doc(db, 'users', uid, 'wordBank', termId)
-    const snap = await getDoc(ref)
-    if (!snap.exists()) {
-      await setDoc(ref, {
+    const userRef = doc(db, 'users', uid)
+    // Keep a private definition snapshot so a shared-cache write cannot block saving.
+    const details = termData ? {
+      term,
+      definition: termData.definition || '',
+      example: termData.example || '',
+      origin: termData.origin || '',
+      category: termData.category || 'expression',
+      related: Array.isArray(termData.related) ? termData.related.filter(value => typeof value === 'string') : [],
+      source: termData.source || 'curated',
+      sourceLabel: termData.sourceLabel || '',
+      sourceUrl: termData.sourceUrl || '',
+    } : null
+
+    return runTransaction(db, async transaction => {
+      const [entry, profile] = await Promise.all([
+        transaction.get(ref),
+        transaction.get(userRef),
+      ])
+      if (entry.exists()) {
+        if (details) transaction.update(ref, { termData: details })
+        return { created: false, termId }
+      }
+
+      transaction.set(ref, {
         term,
+        ...(details ? { termData: details } : {}),
         lookedUpAt: serverTimestamp(),
         masteryLevel: 0,
         nextReviewAt: Timestamp.fromDate(new Date()),
         quizAttempts: 0,
       })
-      await updateDoc(doc(db, 'users', uid), { wordsLookedUp: increment(1) })
-    }
+      const userData = profile.exists() ? profile.data() : userDefaults(currentUser)
+      const count = (userData.wordsLookedUp || 0) + 1
+      const badges = new Set(userData.badges || [])
+      for (const [badge, threshold] of [['first_look', 1], ['word_collector', 10], ['culture_scholar', 50]]) {
+        if (count >= threshold) badges.add(badge)
+      }
+      const recentActivity = [
+        { type: 'added', term, at: new Date().toISOString() },
+        ...(userData.recentActivity || []).filter(item => !(item.type === 'added' && item.term === term)),
+      ].slice(0, 5)
+      transaction.set(userRef, {
+        ...(!profile.exists() ? userData : {}),
+        wordsLookedUp: count,
+        xp: (userData.xp || 0) + 2,
+        badges: [...badges],
+        recentActivity,
+      }, { merge: true })
+      return { created: true, termId }
+    })
+  },
+
+  subscribeWordBank(uid, onNext, onError) {
+    return onSnapshot(
+      query(collection(db, 'users', uid, 'wordBank'), orderBy('lookedUpAt', 'desc')),
+      snapshot => onNext(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }))),
+      onError,
+    )
   },
 
   async getWordBank(uid) {

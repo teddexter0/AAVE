@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     const data = await response.json()
     if (!Array.isArray(data.entries)) throw new Error('Invalid provider response')
     res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400')
-    const entries = filterSlangEntries(data.entries)
+    const entries = filterSlangEntries(data.entries, term)
     if (!entries.length) res.setHeader('Cache-Control', 'no-store')
     return res.status(200).json({ found: entries.length > 0, entries })
   } catch {
